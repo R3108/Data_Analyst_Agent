@@ -1,0 +1,233 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root {
+  color-scheme: light;
+  --canvas: #f6f6f3;
+  --panel: #ffffff;
+  --muted: #f1f0ec;
+  --subtle: #e8e7e2;
+  --line: rgba(11, 11, 11, 0.08);
+  --line-strong: rgba(11, 11, 11, 0.15);
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --ink-3: #898781;
+  --accent: #2a78d6;
+  --accent-hover: #256abf;
+  --accent-soft: rgba(42, 120, 214, 0.1);
+  --accent-ink: #1c5cab;
+  --good: #006300;
+  --good-soft: rgba(12, 163, 12, 0.1);
+  --bad: #b83232;
+  --bad-soft: rgba(208, 59, 59, 0.09);
+  --warn: #8a5a00;
+  --warn-soft: rgba(250, 178, 25, 0.16);
+  --shadow-card: 0 1px 2px rgba(11, 11, 11, 0.04), 0 1px 1px rgba(11, 11, 11, 0.02);
+  --shadow-pop: 0 12px 32px -8px rgba(11, 11, 11, 0.18), 0 2px 6px rgba(11, 11, 11, 0.06);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #0f0f0e;
+  --panel: #1a1a19;
+  --muted: #222220;
+  --subtle: #2c2c2a;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.16);
+  --ink: #ffffff;
+  --ink-2: #c3c2b7;
+  --ink-3: #898781;
+  --accent: #3987e5;
+  --accent-hover: #5598e7;
+  --accent-soft: rgba(57, 135, 229, 0.16);
+  --accent-ink: #86b6ef;
+  --good: #0ca30c;
+  --good-soft: rgba(12, 163, 12, 0.16);
+  --bad: #e66767;
+  --bad-soft: rgba(230, 103, 103, 0.14);
+  --warn: #fab219;
+  --warn-soft: rgba(250, 178, 25, 0.14);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-pop: 0 16px 40px -8px rgba(0, 0, 0, 0.6), 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-panel: var(--panel);
+  --color-muted: var(--muted);
+  --color-subtle: var(--subtle);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-ink: var(--accent-ink);
+  --color-good: var(--good);
+  --color-good-soft: var(--good-soft);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --shadow-card: var(--shadow-card);
+  --shadow-pop: var(--shadow-pop);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--accent-soft);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+/* Layered so utilities (e.g. focus-visible:outline-none) can override it. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.animate-rise {
+  animation: rise 0.35s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+.shimmer-text {
+  background: linear-gradient(90deg, var(--ink-2) 0%, var(--ink) 40%, var(--ink-2) 80%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 2.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-rise,
+  .shimmer-text {
+    animation: none;
+  }
+  .shimmer-text {
+    color: var(--ink-2);
+  }
+}
+
+/* Print / PDF export */
+@media print {
+  @page {
+    margin: 12mm;
+  }
+  html,
+  body {
+    height: auto !important;
+    background: #ffffff !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-avoid-break,
+  article section {
+    break-inside: avoid;
+  }
+  .animate-rise {
+    animation: none !important;
+  }
+  * {
+    box-shadow: none !important;
+  }
+}
+
+/* Markdown answers */
+.prose-answer {
+  font-size: 0.9375rem;
+  line-height: 1.7;
+  color: var(--ink);
+}
+.prose-answer p + p,
+.prose-answer p + ul,
+.prose-answer ul + p,
+.prose-answer p + ol {
+  margin-top: 0.75em;
+}
+.prose-answer ul,
+.prose-answer ol {
+  padding-left: 1.25rem;
+}
+.prose-answer ul {
+  list-style: disc;
+}
+.prose-answer ol {
+  list-style: decimal;
+}
+.prose-answer li + li {
+  margin-top: 0.3em;
+}
+.prose-answer li::marker {
+  color: var(--ink-3);
+}
+.prose-answer strong {
+  font-weight: 600;
+}
+.prose-answer code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--muted);
+  border-radius: 0.3rem;
+  padding: 0.1em 0.35em;
+}
+.prose-answer a {
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.prose-answer table {
+  width: 100%;
+  font-size: 0.85rem;
+  margin-top: 0.75em;
+  border-collapse: collapse;
+}
+.prose-answer th,
+.prose-answer td {
+  border-bottom: 1px solid var(--line);
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+}
