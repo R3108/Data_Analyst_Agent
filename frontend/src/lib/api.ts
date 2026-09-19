@@ -10,6 +10,9 @@ import type {
   BoardSummary,
   Briefing,
   ChatEvent,
+  CohortOptions,
+  CohortQuery,
+  CohortResult,
   Comment,
   CommentListing,
   CommentSubject,
@@ -22,6 +25,9 @@ import type {
   DriverOptions,
   DriverQuery,
   DriverResult,
+  ForecastOptions,
+  ForecastQuery,
+  ForecastResult,
   GoalSeekResult,
   Health,
   Identity,
@@ -32,8 +38,11 @@ import type {
   MonitorRun,
   PinKind,
   Preview,
+  PrivacyAction,
+  PrivacyReport,
   RecallMatch,
   RecallSummary,
+  RootCause,
   RouteResult,
   ScenarioQuery,
   ScenarioResult,
@@ -202,6 +211,35 @@ export const api = {
       ...json(query),
     }),
 
+  cohortOptions: (id: string) => request<CohortOptions>(`/api/datasets/${id}/cohorts/options`),
+  analyzeCohorts: (id: string, query: CohortQuery = {}) =>
+    request<CohortResult>(`/api/datasets/${id}/cohorts`, { method: "POST", ...json(query) }),
+  downloadCohorts: (id: string, query: CohortQuery = {}) =>
+    downloadDocument(`/api/datasets/${id}/cohorts/export.md`, "cohort-retention.md", {
+      method: "POST",
+      ...json(query),
+    }),
+
+  forecastOptions: (id: string) => request<ForecastOptions>(`/api/datasets/${id}/forecast/options`),
+  forecast: (id: string, query: ForecastQuery = {}) =>
+    request<ForecastResult>(`/api/datasets/${id}/forecast`, { method: "POST", ...json(query) }),
+  downloadForecast: (id: string, query: ForecastQuery = {}) =>
+    downloadDocument(`/api/datasets/${id}/forecast/export.md`, "forecast.md", {
+      method: "POST",
+      ...json(query),
+    }),
+
+  getPrivacy: (id: string) => request<PrivacyReport>(`/api/datasets/${id}/privacy`),
+  scanPrivacy: (id: string) =>
+    request<PrivacyReport>(`/api/datasets/${id}/privacy/scan`, { method: "POST" }),
+  savePrivacy: (id: string, policy: Record<string, PrivacyAction>) =>
+    request<PrivacyReport>(`/api/datasets/${id}/privacy`, { method: "PUT", ...json({ policy }) }),
+  /** Irreversible: rewrites the cleaned table and purges the original upload. */
+  applyPrivacy: (id: string) =>
+    request<PrivacyReport>(`/api/datasets/${id}/privacy/apply`, { method: "POST" }),
+  downloadPrivacy: (id: string) =>
+    downloadDocument(`/api/datasets/${id}/privacy.md`, "privacy-review.md"),
+
   significanceOptions: (id: string) =>
     request<SignificanceOptions>(`/api/datasets/${id}/significance/options`),
   testSignificance: (id: string, query: SignificanceQuery = {}) =>
@@ -316,6 +354,12 @@ export const api = {
   deleteMonitor: (id: string) => request<void>(`/api/monitors/${id}`, { method: "DELETE" }),
   runMonitor: (id: string) =>
     request<{ monitor: Monitor; run: MonitorRun }>(`/api/monitors/${id}/run`, { method: "POST" }),
+  /** Why did this metric move? The driver drill-down on the monitor's own measure. */
+  diagnoseMonitor: (id: string, measure?: string) =>
+    request<RootCause>(
+      `/api/monitors/${id}/diagnose${measure ? `?measure=${encodeURIComponent(measure)}` : ""}`,
+      { method: "POST" },
+    ),
   runAllMonitors: (datasetId?: string) =>
     request<{ ran: number; results: { monitor: Monitor; run: MonitorRun }[] }>(
       `/api/monitors/run${datasetId ? `?dataset_id=${datasetId}` : ""}`,
@@ -360,10 +404,10 @@ export const api = {
     boardId: string,
     body: {
       kind: "chart" | "table";
-      source: "drivers" | "significance" | "scenarios";
+      source: "drivers" | "significance" | "scenarios" | "cohorts" | "forecast";
       dataset_id: string;
       index: number;
-      params: DriverQuery | SignificanceQuery | ScenarioQuery;
+      params: DriverQuery | SignificanceQuery | ScenarioQuery | CohortQuery | ForecastQuery;
       title?: string;
     },
   ) => request<BoardItem>(`/api/boards/${boardId}/items`, { method: "POST", ...json(body) }),

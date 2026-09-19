@@ -29,8 +29,11 @@ from app.api.deps import (
 from app.core.auth import actor
 from app.core.config import Settings
 from app.core.errors import InvalidInputError, NotFoundError
+from app.services import cohorts as cohort_service
 from app.services import contracts as contract_service
 from app.services import drivers as drivers_service
+from app.services import forecasting as forecast_service
+from app.services import privacy as privacy_service
 from app.services import scenarios as scenario_service
 from app.services import statistics as statistics_service
 from app.services.activity import ActivityService
@@ -113,6 +116,36 @@ class ScenarioBody(BaseModel):
         payload = self.model_dump(exclude={"levers"})
         payload["levers"] = self.levers.to_payload()
         return payload
+
+
+class CohortBody(BaseModel):
+    """Everything is optional: omitted fields fall back to the profile's best guess."""
+
+    entity: str | None = None
+    date_column: str | None = None
+    measure: str | None = None
+    granularity: Literal["auto", "day", "week", "month", "quarter"] = "auto"
+    periods: int = Field(default=12, ge=1, le=24)
+    min_cohort_size: int = Field(default=3, ge=1, le=1000)
+
+
+class ForecastBody(BaseModel):
+    """Everything is optional: omitted fields fall back to the profile's best guess."""
+
+    measure: str | None = None
+    date_column: str | None = None
+    aggregation: Literal["sum", "mean"] | None = None
+    granularity: Literal["auto", "day", "week", "month", "quarter"] = "auto"
+    horizon: int = Field(default=6, ge=1, le=36)
+    # "auto" picks whichever candidate wins the walk-forward backtest.
+    method: str = "auto"
+    interval: float = Field(default=0.8, ge=0.5, le=0.99)
+
+
+class PrivacyBody(BaseModel):
+    """Column name → what should happen to it: keep, mask, hash or drop."""
+
+    policy: dict[str, Literal["keep", "mask", "hash", "drop"]] = Field(default_factory=dict)
 
 
 class GoalSeekBody(ScenarioBody):
@@ -382,6 +415,135 @@ def export_scenario(
         scenario_service.simulate_markdown(result, record["name"]),
         media_type="text/markdown; charset=utf-8",
         headers={"Content-Disposition": 'attachment; filename="scenario.md"'},
+    )
+
+
+@router.get("/{dataset_id}/cohorts/options")
+def cohort_options(dataset_id: str,
+                   datasets: DatasetService = Depends(get_datasets)) -> dict[str, Any]:
+    """Which entity, date and value columns a cohort grid can be built from."""
+    return cohort_service.cohort_options(datasets.get(dataset_id)["profile"])
+
+
+@router.post("/{dataset_id}/cohorts")
+def analyze_cohorts(
+    dataset_id: str,
+    body: CohortBody = Body(default_factory=CohortBody),
+    datasets: DatasetService = Depends(get_datasets),
+) -> dict[str, Any]:
+    """Retention by cohort, respecting right-censoring. No model call."""
+    record = datasets.get(dataset_id)
+    return cohort_service.analyze(
+        datasets.load_frame(dataset_id), record["profile"], **body.model_dump()
+    )
+
+
+@router.post("/{dataset_id}/cohorts/export.md", response_class=PlainTextResponse)
+def export_cohorts(
+    dataset_id: str,
+    body: CohortBody = Body(default_factory=CohortBody),
+    datasets: DatasetService = Depends(get_datasets),
+) -> PlainTextResponse:
+    record = datasets.get(dataset_id)
+    result = cohort_service.analyze(
+        datasets.load_frame(dataset_id), record["profile"], **body.model_dump()
+    )
+    return PlainTextResponse(
+        cohort_service.cohort_markdown(result, record["name"]),
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="cohort-retention.md"'},
+    )
+
+
+@router.get("/{dataset_id}/forecast/options")
+def forecast_options(dataset_id: str,
+                     datasets: DatasetService = Depends(get_datasets)) -> dict[str, Any]:
+    """Which measures, dates, grains and methods a projection can be built on."""
+    return forecast_service.forecast_options(datasets.get(dataset_id)["profile"])
+
+
+@router.post("/{dataset_id}/forecast")
+def forecast(
+    dataset_id: str,
+    body: ForecastBody = Body(default_factory=ForecastBody),
+    datasets: DatasetService = Depends(get_datasets),
+) -> dict[str, Any]:
+    """Project a measure forward, with the walk-forward backtest that chose the method."""
+    record = datasets.get(dataset_id)
+    return forecast_service.project(
+        datasets.load_frame(dataset_id), record["profile"], **body.model_dump()
+    )
+
+
+@router.post("/{dataset_id}/forecast/export.md", response_class=PlainTextResponse)
+def export_forecast(
+    dataset_id: str,
+    body: ForecastBody = Body(default_factory=ForecastBody),
+    datasets: DatasetService = Depends(get_datasets),
+) -> PlainTextResponse:
+    record = datasets.get(dataset_id)
+    result = forecast_service.project(
+        datasets.load_frame(dataset_id), record["profile"], **body.model_dump()
+    )
+    return PlainTextResponse(
+        forecast_service.project_markdown(result, record["name"]),
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="forecast.md"'},
+    )
+
+
+@router.get("/{dataset_id}/privacy")
+def get_privacy(dataset_id: str,
+                datasets: DatasetService = Depends(get_datasets)) -> dict[str, Any]:
+    """What personal data was detected, and what the policy says to do about it."""
+    return datasets.get_privacy(dataset_id)
+
+
+@router.post("/{dataset_id}/privacy/scan")
+def scan_privacy(dataset_id: str,
+                 datasets: DatasetService = Depends(get_datasets)) -> dict[str, Any]:
+    """Re-run detection against the table as it stands now."""
+    return datasets.scan_privacy(dataset_id)
+
+
+@router.put("/{dataset_id}/privacy")
+def put_privacy(
+    dataset_id: str,
+    body: PrivacyBody = Body(default_factory=PrivacyBody),
+    datasets: DatasetService = Depends(get_datasets),
+) -> dict[str, Any]:
+    """Record what should happen to each column. Nothing is rewritten until /apply."""
+    return datasets.set_privacy(dataset_id, body.policy)
+
+
+@router.post("/{dataset_id}/privacy/apply")
+def apply_privacy(
+    dataset_id: str,
+    request: Request,
+    datasets: DatasetService = Depends(get_datasets),
+    activity: ActivityService = Depends(get_activity),
+) -> dict[str, Any]:
+    """Rewrite the cleaned table under the policy. Irreversible, and audited."""
+    record = datasets.get(dataset_id)
+    state = datasets.apply_privacy(dataset_id)
+    applied = state["state"].get("applied") or []
+    activity.record(
+        "dataset.redact", actor=actor(request), subject_kind="dataset", subject_id=dataset_id,
+        subject_title=record["name"],
+        detail=", ".join(f"{a['column']} → {a['action']}" for a in applied[:8]) or "no columns",
+    )
+    return state
+
+
+@router.get("/{dataset_id}/privacy.md", response_class=PlainTextResponse)
+def privacy_markdown(dataset_id: str,
+                     datasets: DatasetService = Depends(get_datasets)) -> PlainTextResponse:
+    record = datasets.get(dataset_id)
+    state = datasets.get_privacy(dataset_id)
+    return PlainTextResponse(
+        privacy_service.privacy_markdown(state["scan"], state["state"], record["name"]),
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="privacy-review.md"'},
     )
 
 

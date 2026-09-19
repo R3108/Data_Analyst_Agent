@@ -6,7 +6,8 @@ export interface Health {
   model: string;
   llm_credentials_detected: boolean;
   sandbox: { timeout_s: number; memory_mb: number };
-  monitors?: { interval_minutes: number };
+  monitors?: { interval_minutes: number; root_cause?: boolean };
+  privacy?: { scan_enabled: boolean };
   alerts?: { enabled: boolean; email_configured: boolean; digest_hours: number };
   briefings?: { interval_minutes: number };
   investigations?: { max_steps: number };
@@ -230,6 +231,281 @@ export interface DriverResult {
   follow_up: string;
   charts: ChartOutput[];
   tables: TableOutput[];
+}
+
+/* --- Cohorts & retention -------------------------------------------------- */
+
+export type Granularity = "auto" | "day" | "week" | "month" | "quarter";
+
+export interface CohortOptions {
+  entities: { name: string; unique: number; rows_per_entity: number; role: string }[];
+  date_columns: string[];
+  measures: string[];
+  granularities: Granularity[];
+  defaults: {
+    entity: string | null;
+    date_column: string | null;
+    measure: string | null;
+    granularity: Granularity;
+    periods: number;
+  };
+  available: boolean;
+  reason: string | null;
+}
+
+export interface CohortQuery {
+  entity?: string;
+  date_column?: string;
+  /** Explicit null means "count entities only, no value curve". */
+  measure?: string | null;
+  granularity?: Granularity;
+  periods?: number;
+  min_cohort_size?: number;
+}
+
+export interface CohortRow {
+  cohort: number;
+  label: string;
+  start: string | null;
+  size: number;
+  observed_offsets: number;
+  /** `null` at an offset the cohort has not lived long enough to have. Never zero. */
+  active: (number | null)[];
+  retention: (number | null)[];
+  value: (number | null)[];
+  value_per_entity: (number | null)[];
+  revenue_retention: (number | null)[];
+}
+
+export interface CohortResult {
+  entity: string;
+  date_column: string;
+  measure: string | null;
+  granularity: Granularity;
+  period_noun: string;
+  horizon: number;
+  cohorts: CohortRow[];
+  folded: number;
+  offsets: number[];
+  curve: {
+    offsets: number[];
+    retention: (number | null)[];
+    value_per_entity: (number | null)[];
+    cumulative_value_per_entity: (number | null)[];
+    cohorts_observed: number[];
+    entities_observed: number[];
+  };
+  summary: {
+    entities: number;
+    cohorts: number;
+    grain: string;
+    repeat_rate: number | null;
+    one_and_done_pct: number | null;
+    median_active_periods: number | null;
+    mean_active_periods: number | null;
+    median_periods_to_return: number | null;
+    retention_1: number | null;
+    retention_3: number | null;
+    retention_6: number | null;
+    retention_12: number | null;
+    benchmark_offset: number | null;
+    best_cohort: { cohort: number; retention: number; size: number } | null;
+    worst_cohort: { cohort: number; retention: number; size: number } | null;
+    revenue_retention_1: number | null;
+    value_per_entity_total: number | null;
+  };
+  coverage: {
+    rows: number;
+    rows_dropped: number;
+    entities: number;
+    periods: number;
+    first_period: string;
+    last_period: string;
+    final_period_complete: boolean;
+    min_cohort_size: number;
+  };
+  options: CohortOptions;
+  headline: string;
+  narrative: string[];
+  caveats: string[];
+  follow_up: string;
+  charts: ChartOutput[];
+  tables: TableOutput[];
+}
+
+/* --- Forecasting ---------------------------------------------------------- */
+
+export interface ForecastMethod {
+  id: string;
+  label: string;
+  detail: string;
+}
+
+export interface ForecastOptions {
+  measures: { name: string; aggregation: Aggregation }[];
+  date_columns: string[];
+  granularities: Granularity[];
+  methods: ForecastMethod[];
+  defaults: {
+    measure: string | null;
+    date_column: string | null;
+    aggregation: Aggregation;
+    granularity: Granularity;
+    horizon: number;
+    method: string;
+    interval: number;
+  };
+  available: boolean;
+  reason: string | null;
+}
+
+export interface ForecastQuery {
+  measure?: string;
+  date_column?: string;
+  aggregation?: Aggregation;
+  granularity?: Granularity;
+  horizon?: number;
+  /** "auto" lets the walk-forward backtest pick. */
+  method?: string;
+  interval?: number;
+}
+
+export interface ForecastScore {
+  method: string;
+  label: string;
+  detail: string;
+  baseline: boolean;
+  mae: number;
+  rmse: number;
+  mape: number | null;
+  smape: number | null;
+  /** Scaled against the naive baseline: 1.0 means "no better than doing nothing". */
+  mase: number | null;
+  points: number;
+  bias: number;
+  complete: boolean;
+  by_step: { step: number; mae: number; points: number }[];
+}
+
+export interface ForecastPoint {
+  period: string;
+  value: number;
+  lower: number;
+  upper: number;
+  step: number;
+}
+
+export interface ForecastResult {
+  measure: string;
+  date_column: string;
+  aggregation: Aggregation;
+  granularity: Granularity;
+  period_noun: string;
+  season_length: number;
+  horizon: number;
+  interval: number;
+  method: string;
+  method_label: string;
+  method_detail: string;
+  selection: string;
+  history: { period: string; value: number }[];
+  forecast: ForecastPoint[];
+  accuracy: ForecastScore[];
+  backtest: {
+    folds: number;
+    origins: number[];
+    tested_points: number;
+    interval_source: string;
+  };
+  verdict: {
+    label: "useful" | "weak" | "no better" | "baseline";
+    summary: string;
+    baseline: string | null;
+    baseline_label: string | null;
+    baseline_mae: number | null;
+    improvement: number | null;
+    trustworthy: boolean;
+  };
+  totals: {
+    projected: number;
+    recent: number;
+    recent_periods: number;
+    change: number;
+    change_pct: number | null;
+    last_actual: number;
+    next_period: number;
+    direction: "up" | "down" | "flat";
+  };
+  coverage: {
+    observations: number;
+    first_period: string;
+    last_period: string;
+    rows_used: number;
+    rows_dropped: number;
+    empty_periods: number;
+    trimmed_partial: string[];
+  };
+  options: ForecastOptions;
+  headline: string;
+  narrative: string[];
+  caveats: string[];
+  follow_up: string;
+  charts: ChartOutput[];
+  tables: TableOutput[];
+}
+
+/* --- Privacy guard -------------------------------------------------------- */
+
+export type PrivacyAction = "keep" | "mask" | "hash" | "drop";
+export type PrivacySeverity = "high" | "medium" | "low";
+export type PrivacyStatus = "sensitive" | "review" | "clear" | "off";
+
+export interface PrivacyFinding {
+  column: string;
+  kind: string;
+  label: string;
+  severity: PrivacySeverity;
+  confidence: number;
+  recommended: PrivacyAction;
+  why: string;
+  basis: string;
+  match_rate: number | null;
+  sampled: number;
+  /** The structure of a value — letters as `a`, digits as `9`. Never a real value. */
+  shape: string | null;
+  missing_pct?: number;
+  unique?: number;
+}
+
+export interface PrivacyScan {
+  findings: PrivacyFinding[];
+  counts: Record<PrivacySeverity, number>;
+  sensitive_columns: string[];
+  status: PrivacyStatus;
+  headline: string;
+  suggested_policy: Record<string, PrivacyAction>;
+  scanned_columns: number;
+}
+
+export interface PrivacyState {
+  policy: Record<string, PrivacyAction>;
+  salt: string | null;
+  applied_at: string | null;
+  applied: {
+    column: string;
+    action: PrivacyAction;
+    status: "applied" | "missing";
+    affected?: number;
+    detail: string;
+  }[];
+  raw_purged?: boolean;
+}
+
+export interface PrivacyReport {
+  scan: PrivacyScan;
+  state: PrivacyState;
+  applied: boolean;
+  suggested: boolean;
 }
 
 /* --- Significance testing ------------------------------------------------ */
@@ -643,6 +919,8 @@ export interface ColumnProfile {
   top_values?: { value: string | number | boolean | null; count: number }[];
   sample_values?: unknown[];
   avg_length?: number;
+  /** Set by the privacy guard: example values are withheld from the profile and prompts. */
+  sensitive?: boolean;
 }
 
 export interface DatasetProfile {
@@ -656,6 +934,8 @@ export interface DatasetProfile {
   sample_rows: { columns: string[]; rows: unknown[][] };
   suggested_questions: string[];
   signals?: Signal[];
+  /** Columns whose values are kept out of every prompt. */
+  withheld_columns?: string[];
 }
 
 export interface Signal {
@@ -725,6 +1005,8 @@ export interface Dataset extends DatasetSummary {
   version_diff?: VersionDiff | null;
   contract?: DataContract | null;
   contract_result?: ContractResult | null;
+  privacy?: PrivacyState | null;
+  privacy_scan?: PrivacyScan | null;
 }
 
 export interface Preview {
@@ -854,7 +1136,38 @@ export interface MonitorRun {
   breached: boolean;
   detail: string | null;
   duration_ms: number | null;
+  root_cause?: RootCause | null;
   created_at: string;
+}
+
+/** The deterministic drill-down a breach carries with it. Computed, never generated. */
+export interface RootCause {
+  status: "ok" | "unavailable";
+  reason?: string;
+  measure?: string;
+  matched_on?: string;
+  dimension?: string | null;
+  headline?: string;
+  total?: DriverResult["total"];
+  period?: DriverResult["period"];
+  contributors: {
+    label: string;
+    change: number;
+    contribution_pct: number | null;
+    share_change: number | null;
+    status: string;
+  }[];
+  largest_term?: {
+    key: string;
+    label: string;
+    value: number;
+    share: number | null;
+    detail: string;
+  } | null;
+  summary: string | null;
+  follow_up?: string;
+  /** Everything needed to reopen the full drill-down pre-aimed at this finding. */
+  params?: DriverQuery;
 }
 
 export interface Monitor {
@@ -876,6 +1189,8 @@ export interface Monitor {
   last_run_at: string | null;
   last_detail: string | null;
   last_change_pct: number | null;
+  /** The most recent explanation, kept after recovery so the breach stays readable. */
+  root_cause?: RootCause | null;
   formatted_value: string;
   rule: string;
   history: number[];

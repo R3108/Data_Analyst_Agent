@@ -7,7 +7,9 @@ import { IconButton } from "@/components/ui/primitives";
 import { cn } from "@/lib/cn";
 import type {
   BoardSummary,
+  CohortQuery,
   DriverQuery,
+  ForecastQuery,
   PinKind,
   ScenarioQuery,
   SignificanceQuery,
@@ -19,7 +21,7 @@ interface PinTargetBase {
 }
 
 /** The deterministic views that are pinned by provenance rather than by message. */
-export type ComputedSource = "drivers" | "significance" | "scenarios";
+export type ComputedSource = "drivers" | "significance" | "scenarios" | "cohorts" | "forecast";
 
 /**
  * Two provenances, never a payload: an analysis result is addressed by message, a
@@ -32,7 +34,7 @@ export type PinTarget =
       kind: "chart" | "table";
       source: ComputedSource;
       datasetId: string;
-      params: DriverQuery | SignificanceQuery | ScenarioQuery;
+      params: DriverQuery | SignificanceQuery | ScenarioQuery | CohortQuery | ForecastQuery;
     });
 
 interface PinContextValue {

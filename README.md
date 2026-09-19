@@ -8,11 +8,13 @@ and explains what it all means for the business.
 Then it does the part that makes the answer usable: it **verifies every figure it wrote against
 the numbers it actually computed**, honours **your** definition of each metric, tells you whether
 a difference is **real or just noise**, breaks any change down into **the segments, volume, mix and
-rate that caused it**, lets you **move the levers and solve for a target**, pulls the data straight
-out of **your warehouse**, holds next month's load to a **data contract**, keeps watching the KPIs
-you care about — **telling Slack or your inbox the moment one breaks** — re-asks your standing
-questions **on a schedule**, and hands the whole thing over as a runnable notebook, a real PDF or an
-editable PowerPoint deck.
+rate that caused it**, follows each cohort forward to see **whether what you won stayed won**,
+projects the next few periods **with the backtest that earned the projection**, lets you **move the
+levers and solve for a target**, finds the personal data in your file and **keeps it out of every
+prompt before you have decided anything**, pulls the data straight out of **your warehouse**, holds
+next month's load to a **data contract**, keeps watching the KPIs you care about — **telling Slack or
+your inbox the moment one breaks, and why** — re-asks your standing questions **on a schedule**, and
+hands the whole thing over as a runnable notebook, a real PDF or an editable PowerPoint deck.
 
 Built from scratch with **LangGraph** + **OpenAI** (Responses API) on a **FastAPI** backend
 and a **Next.js 16 / React 19 / Tailwind v4** frontend.
@@ -39,13 +41,17 @@ here comes with a verification score instead of a shrug.
 | 📊 **KPIs, charts & tables** | Formatted KPI tiles with deltas, themed interactive Plotly charts (light & dark), sortable tables with CSV export. |
 | ⚡ **Proactive signals** | Deterministic trend, anomaly, seasonality, mix-shift, concentration, correlation and data-quality detectors surface noteworthy findings as soon as a dataset is ingested. |
 | 🎯 **Decision playbooks** | One-click executive brief, growth-driver, risk-radar and forecast/opportunity workflows adapt themselves to each dataset's measures, dimensions and dates. |
-| ⌨️ **Keyboard-first** | `Ctrl/⌘ K` opens a command palette over every analysis, board, dataset, drill-down, contract and export. |
-| 🔮 **Forecasting** | Sandboxed analysis code can call a guarded forecasting helper for regular time series, including trend, seasonal estimates and prediction intervals. |
+| ⌨️ **Keyboard-first** | `Ctrl/⌘ K` opens a command palette over every analysis, board, dataset, drill-down, retention grid, projection, contract, privacy review and export. |
+| 🔮 **Forecasting in an answer** | Sandboxed analysis code can also call a guarded forecasting helper mid-analysis, so "project this forward" works inside an ordinary question — trend, seasonal estimates and prediction intervals included. The dedicated lab below is where the projection is *proved*. |
 | 💡 **Business insights** | Headline answer, narrative, insights with sentiment, recommended actions, caveats and follow-up questions — grounded strictly in computed numbers. |
 | 🔍 **Answer verification** | A deterministic audit after every analysis: each figure in the write-up must trace back to a computed value, plus checks for double-multiplied percentages, shares that don't add up, undisclosed missing data, outlier-sensitive averages and ignored metric definitions. Scored, explained and shown to the reader. **No model call.** |
 | 🪓 **Driver drill-down** | *Why* did it move? Each segment's contribution and its **surprise** (more or less than its size implies), plus a **volume / mix / rate** shift-share whose three terms add back to the change **exactly**. Dimensions are ranked by how unevenly the change is spread. Waterfall charts, a contributor table and a briefing — **no model call**. |
 | 🧪 **Significance lab** | *Is the gap real?* Welch's t-test, Mann-Whitney U or a two-proportion z-test — whichever the measure deserves — a bootstrap interval on the difference itself, effect size, and the smallest difference this sample could have detected. Every segment tested at once with **Benjamini-Hochberg** false-discovery control, so twenty segments stop producing one fake finding. **No model call, no scipy.** |
 | 🎚️ **Scenario studio** | *What would have to be true?* Move volume, per-record rate and the mix between segments and read off the projection — decomposed with the same identity as the drill-down, so the forward and backward views reconcile. **Goal seek** solves for the lever that hits a target, and says plainly when nothing reaches it. |
+| 👥 **Cohort & retention lab** | *Does what you win stay won?* Group every customer, account or device by the period it first appeared and follow each cohort forward: retention grid, pooled curve, repeat rate, time-to-return, best-against-worst at the same age, and cumulative value per entity. A cohort born last month **cannot** have a six-month rate, so those cells stay empty and are excluded from the average — the difference between a retention curve and a picture of the calendar running out. **No model call.** |
+| 🔮 **Forecast lab** | A projection is never shown on its own. Eight methods — including the naive and seasonal-naive baselines — are **refitted from scratch at several origins** and scored on periods no fit ever saw. The winner arrives with its MASE, MAPE and bias, the margin by which it beat the baseline, and a prediction interval built from **its own out-of-sample errors**. When nothing beats the baseline, Numera says so and shows the baseline. **No model call, no statsmodels, no prophet.** |
+| 🛡️ **Privacy guard** | Emails, card numbers (Luhn-checked), national identifiers, phone numbers, names, addresses and IPs are found the moment a file lands — and their example values are **stripped from the stored profile**, which is the object every prompt is built from. That happens whether or not anyone reads the warning. Then keep, **mask**, **hash** or drop per column: hashing keeps a stable pseudonym, so retention analysis still works on a customer id whose real value has left the building. The policy is inherited by the next version and re-applied on arrival, salt included. |
+| 🔍 **Root cause on breach** | A breached monitor does not just say *what* broke. It runs the driver drill-down on its own measure and attaches the segment, the contribution and the volume/mix/rate term to the run, the digest **and the Slack message** — so the alert names a cause instead of handing you the easy half. Costs one more pass over the same table and **zero tokens**. |
 | 🗄️ **Live SQL sources** | Connect Postgres, MySQL, SQL Server, DuckDB or SQLite with one read-only query — joins included, because the database is better at them. Each sync files the result as the **next version**, so the contract is checked on arrival, monitors re-run and the diff tells you what changed. Writes are rejected before a connection opens; credentials never reach the browser. |
 | 🧭 **Deep research** | *Investigate* scopes an objective into several questions, runs each through the **full agent graph**, and synthesises one brief. Every sub-analysis is an ordinary message — its code, charts and verification verdict all inspectable, pinnable and exportable — and the synthesis is told which steps failed, so it cannot launder a broken one into confident prose. |
 | 🧠 **Analysis memory** | Before a question is planned, the closest prior answers on the same dataset are found by TF-IDF — no embedding model — and shown to you *before the work starts*, so a repeat question can be stopped instead of paid for twice. The agent gets them as continuity context, explicitly labelled as historical. **Ask anywhere**: `/api/route` also picks which dataset a question belongs to. |
@@ -70,7 +76,7 @@ here comes with a verification score instead of a shrug.
 ```mermaid
 flowchart LR
     subgraph Browser["Next.js UI"]
-        UI[Workspace · Chat · Drivers · Significance<br/>Scenarios · Sources · Briefings · Monitors]
+        UI[Workspace · Chat · Drivers · Significance · Scenarios<br/>Retention · Forecast · Privacy · Sources · Briefings · Monitors]
     end
     subgraph API["FastAPI backend"]
         AU[Workspace auth<br/>optional bearer token] --> R[REST + SSE routes]
@@ -80,7 +86,7 @@ flowchart LR
         R --> MS[Monitor service<br/>watch · re-run · digest]
         R --> BS[Briefing service<br/>saved question on a cadence]
         R --> SRC[Source service<br/>SQL → next version]
-        R --> DET[Deterministic analysis<br/>drivers · significance · scenarios]
+        R --> DET[Deterministic analysis<br/>drivers · significance · scenarios<br/>cohorts · forecast + backtest]
         IV --> AS
         BS --> AS
         AS --> G[LangGraph agent]
@@ -90,7 +96,11 @@ flowchart LR
         SRC --> EXT[(Postgres · MySQL<br/>DuckDB · SQL Server)]
         SRC --> DS
         DS --> CT[Contract checker<br/>expectations gate]
+        DS --> PG[Privacy guard<br/>detect · shield · redact]
+        PG -. withholds values .-> G
         MS --> SB
+        MS --> RC[Root cause<br/>drill-down on breach]
+        RC --> DET
         MS --> NT[Notifier]
         BS --> NT
         CT --> NT
@@ -110,10 +120,12 @@ flowchart LR
 ```
 
 Everything below the agent — profiling, signals, driver analysis, significance testing, scenario
-projection, analysis recall, verification, contracts and monitor checks — is plain Python over the
-cleaned table. That is deliberate: those are the parts a reader has to be able to trust, so none of
-them can cost a token or invent a number. The two features that *do* spend tokens — investigations
-and scheduled briefings — say so plainly in the interface rather than in a footnote.
+projection, cohort retention, forecasting and its backtest, personal-data detection, analysis
+recall, verification, contracts, monitor checks and the root-cause drill-down attached to a breach
+— is plain Python over the cleaned table. That is deliberate: those are the parts a reader has to
+be able to trust, so none of them can cost a token or invent a number. The two features that *do*
+spend tokens — investigations and scheduled briefings — say so plainly in the interface rather than
+in a footnote.
 
 ### The agent graph
 
@@ -337,6 +349,129 @@ forwards — hold the shape of the business fixed, move one lever, read off what
 
 ---
 
+## Cohorts: does what you win stay won?
+
+Drivers, significance and scenarios all look at a *period*. This looks at a *population over
+time*: group every entity by the period it first appeared, then follow each group forward and read
+off how much of it is still there.
+
+Most cohort grids are quietly wrong in the same way, and it is worth naming.
+
+### Right-censoring, handled rather than ignored
+
+A cohort born last month has not had six months in which to churn. If its six-month cell is
+counted as `0`, the average curve is not measuring retention — it is measuring how much of the
+calendar has elapsed, and it will look worse every month no matter what the business does.
+
+So an unobserved cell is `null`, never zero, and the pooled curve at each offset is computed
+**only over the cohorts that have actually lived that long**, weighted by cohort size. The UI
+prints the number of cohorts behind every point on the curve, so a reader can see when the tail is
+three cohorts rather than fourteen. The partial final period is dropped and disclosed for the same
+reason: a month that is three days old always looks like a collapse.
+
+### What it reads off the grid
+
+| | |
+|---|---|
+| **Retention grid** | Each row is one cohort, each column how many periods later. Newest first, oldest folded into a count so the heat map stays readable. |
+| **Pooled curve** | Size-weighted across every eligible cohort, plus the three newest cohorts drawn faintly behind it so the spread the average hides is visible. |
+| **Repeat rate & one-and-done** | What share ever comes back at all, and what share appears exactly once. |
+| **Time to return** | The median gap before a returner returns — anything measured over a shorter window under-counts repeats, and says so. |
+| **Best against worst** | The strongest and weakest cohort *at the same age*, so the comparison is like-for-like rather than an artefact of one being younger. |
+| **Value per entity** | With a measure selected: cumulative **observed** value per entity, and a revenue-retention ratio against the first period. It is not an LTV projection and does not pretend to be one — the line stops where the data does. |
+
+The entity column is picked by what it is called, not by what repeats most: `Customer ID` beats
+`Customer Email` (an id is the stable key; a contact detail changes), and both beat `Product`,
+however often a product repeats.
+
+---
+
+## Forecasting: the projection and its track record, or neither
+
+A projection is easy to produce and hard to believe. Numera's answer is the one it gives
+everywhere else — don't ask the reader to take it on faith, show the evidence:
+
+> **Nothing is forecast without the walk-forward backtest that chose it.**
+
+Eight methods — naive, seasonal naive, recent mean, drift, linear trend, trend + seasonality,
+damped trend, damped trend + seasonality — are **refitted from scratch at each of up to six
+origins** and scored over the horizon actually being asked for, on periods no fit ever saw.
+
+### Why MASE leads
+
+`MASE` is the headline number because it is scale-free and has an honest zero point: **1.0 means
+"no better than the baseline"**. A method that cannot clear its own baseline has not earned a
+place on the page, and the verdict says so in those words:
+
+| Verdict | What it means |
+|---|---|
+| **Beats the baseline** | Cut out-of-sample error against the best of naive / seasonal naive by more than 2%. |
+| **Weak** | Won the race but still scores MASE ≥ 1 — worse than a one-step naive forecast on this history. |
+| **No better** | Within 2% of the baseline. Read the projection as a trajectory, not a number. |
+| **Baseline is the answer** | Nothing beat doing nothing, so the baseline is what is shown. *That is a finding, not a failure*: this series has no structure worth modelling. |
+
+### Intervals that come from evidence
+
+The prediction interval is the empirical spread of **this method's own out-of-sample errors at
+each horizon step** — not a normality assumption about the residuals it was fitted on. That is why
+it widens with the horizon by itself, and why the "how the error grows" chart and the band are the
+same measurement twice. Where there is not enough held-out history at a step, the interval falls
+back to the residual spread scaled by √h and the result says which of the two it used. A band is
+never allowed to *narrow* with the horizon: a forecast does not become more certain further out,
+whatever a quantile over four folds happens to say.
+
+Fairness is enforced too: seasonality is only offered when there are two full cycles **plus room
+for a fold**, so every candidate can be fitted at every origin, and any method that could not be
+is shown on the scoreboard but never allowed to win.
+
+---
+
+## Privacy: the model never sees the email address
+
+Every convenience in an analyst tool is a way for a value to travel — the schema card sent to the
+model, the sample rows in the UI, a share link, a PDF mailed to a colleague. So the guard works in
+two stages, and **the first one needs no decision from anybody**.
+
+### 1. Detect and quarantine, at upload
+
+Columns are scanned with validated matchers — **Luhn** for card numbers, octet ranges for IP
+addresses, a real email grammar — plus column-name signals. Anything flagged with high confidence
+has its example values stripped from the **stored profile**, which is the object `dataset_context()`
+turns into the model's schema card. The model still gets the column's name, type, role and
+statistics, and a line telling it the values are withheld and must not be guessed at. It never
+gets a value. This happens whether or not anyone reads the warning.
+
+Detection is deliberately conservative about the shapes that are cheap to over-call:
+
+- A 16-digit order number is **not** a card number, because Luhn says so.
+- A bare run of eleven digits is **not** a phone number — unless the column is called `phone`,
+  which switches on the looser matcher for that column only.
+- `Air Fryer` is **not** a person's name. Title-cased two-word values are most of a product
+  catalogue, so `person_name` only fires when the column name agrees.
+- A short alphanumeric reference is **not** a postcode for the same reason.
+
+### 2. Redact, on a decision
+
+Keep, **mask**, **hash** or drop, per column.
+
+| Action | What it does |
+|---|---|
+| `mask` | Rewrites values in place, keeping shape and the last four characters — enough to confirm "yes, that is the right record", and nothing else. |
+| `hash` | A salted SHA-256 pseudonym. The same value always produces the same pseudonym within the lineage, so **grouping, joins and the entire retention view still work** on a customer id whose real value has left the building. |
+| `drop` | The column is removed. |
+
+Applying a policy rewrites **the one cleaned table** that the preview, the sandbox, every export,
+every share link and every board tile all read — so none of them has to remember to filter, and
+none of them can forget. The original upload is deleted in the same step, because keeping it would
+defeat the redaction, and the policy and its salt are **inherited by the next version and
+re-applied on arrival**: next month's export cannot quietly re-introduce what last month's
+redaction removed.
+
+> Detection finds what it recognises. A free-text comment box can always hold something no pattern
+> can see, and the UI says so rather than implying a guarantee it cannot make.
+
+---
+
 ## Live SQL sources: the numbers that matter are not in a CSV
 
 An analyst product that only reads files is one people stop using the moment the stakes rise,
@@ -501,6 +636,26 @@ re-checking that number a single sandbox run and **zero model tokens**.
 Because the check re-executes real code against real data, a monitor reports *failure* when the
 analysis no longer applies (renamed column, missing KPI) rather than quietly serving a stale number.
 
+### And when it breaks, it says why
+
+"Revenue is below target" is the easy half of the answer. The half that matters is *which segment
+did it* — and Numera already computes that deterministically for any measure in the table, so the
+moment a monitor breaches it runs the driver drill-down and attaches the result to the run.
+
+1. **Which measure?** Worked out from the KPI's own label, then the question behind the monitor,
+   then the snapshotted code — a column referenced in the code that computed the number is at
+   least in the neighbourhood of the right answer. The UI says which of the three it matched on.
+2. **The drill-down.** Best-scoring dimension, the top contributors with their share of the move,
+   and the largest of the volume / mix / rate terms.
+3. **Everywhere it is read.** The run, the monitor card, the Markdown digest **and the Slack or
+   email alert**, which now carries a *Most likely driver* field instead of a number and a shrug.
+   One click opens the full drill-down pre-aimed at the same measure and dimension.
+
+It costs one more pass over the same cleaned table and **zero tokens**, and it is best-effort by
+design: a dataset with no dates or nothing to segment by still gets its breach alert, without the
+explanation and saying so. `POST /api/monitors/{id}/diagnose` asks for it on demand, breached or
+not. Set `MONITOR_ROOT_CAUSE=false` if a very large table makes the sweep too slow.
+
 ---
 
 ## Reproducible deliverables
@@ -592,6 +747,8 @@ All settings are environment variables (read from `.env` at the repo root or in 
 | `SANDBOX_MEMORY_MB` | `2048` | Memory limit per execution (process tree RSS). |
 | `MONITOR_INTERVAL_MINUTES` | `0` | Background monitor sweep interval; `0` disables the scheduler (monitors still run on demand and on new dataset versions). Checks cost no model tokens. |
 | `MONITOR_HISTORY_LIMIT` | `60` | Observations kept per monitor. |
+| `MONITOR_ROOT_CAUSE` | `true` | Run the driver drill-down when a monitor breaches and attach it to the run, the digest and the alert. One extra pass over the cleaned table; no tokens. |
+| `PRIVACY_SCAN_ENABLED` | `true` | Run personal-data detection at upload. Detected values are withheld from every prompt regardless; this only controls whether the detector runs. |
 | `ALERTS_ENABLED` | `true` | Master switch for Slack / webhook / email delivery. |
 | `ALERT_TIMEOUT_S` | `10` | Per-delivery timeout. |
 | `ALERT_DIGEST_HOURS` | `0` | Scheduled monitor briefing; `0` disables it (state changes still alert). |
@@ -629,6 +786,16 @@ All settings are environment variables (read from `.env` at the repo root or in 
 | `POST` | `/api/datasets/{id}/scenarios` | Project a measure under volume / rate / mix levers. **No model call** |
 | `POST` | `/api/datasets/{id}/scenarios/goal-seek` | Solve for the lever value that reaches a target — or report that none does |
 | `POST` | `/api/datasets/{id}/scenarios/export.md` | The scenario as a Markdown briefing |
+| `GET` | `/api/datasets/{id}/cohorts/options` | Entity, date and value columns a cohort grid can be built from |
+| `POST` | `/api/datasets/{id}/cohorts` | Retention by cohort, respecting right-censoring. **No model call** |
+| `POST` | `/api/datasets/{id}/cohorts/export.md` | The retention grid as a Markdown briefing |
+| `GET` | `/api/datasets/{id}/forecast/options` | Measures, dates, grains and the eight candidate methods |
+| `POST` | `/api/datasets/{id}/forecast` | Project a measure forward *with* the walk-forward backtest that chose the method. **No model call** |
+| `POST` | `/api/datasets/{id}/forecast/export.md` | The projection and its scoreboard as a Markdown briefing |
+| `GET` · `PUT` | `/api/datasets/{id}/privacy` | The scan and the redaction policy / replace the policy (nothing is rewritten yet) |
+| `POST` | `/api/datasets/{id}/privacy/scan` | Re-run detection against the table as it stands now |
+| `POST` | `/api/datasets/{id}/privacy/apply` | **Irreversible.** Rewrite the cleaned table under the policy and purge the original upload |
+| `GET` | `/api/datasets/{id}/privacy.md` | The findings, the policy and the redaction audit trail as Markdown |
 | `GET` | `/api/datasets/{id}/download?format=csv\|parquet` | The cleaned table |
 | `DELETE` | `/api/datasets/{id}` | Delete dataset and its sessions |
 | `GET` · `POST` | `/api/sessions` | List / create chat sessions |
@@ -641,7 +808,7 @@ All settings are environment variables (read from `.env` at the repo root or in 
 | `POST` · `DELETE` | `/api/sessions/{id}/share` | Create / revoke a read-only analysis link |
 | `GET` · `POST` | `/api/boards` | List / create boards |
 | `GET` · `PATCH` · `DELETE` | `/api/boards/{id}` | Read / update / delete a board |
-| `POST` | `/api/boards/{id}/items` | Pin an analysis result, pin a drill-down (`source=drivers`, recomputed server-side), or add a note |
+| `POST` | `/api/boards/{id}/items` | Pin an analysis result, pin a deterministic result (`source=drivers` · `significance` · `scenarios` · `cohorts` · `forecast`, recomputed server-side), or add a note |
 | `PATCH` · `DELETE` | `/api/boards/{id}/items/{item_id}` | Update / remove a board item |
 | `PUT` | `/api/boards/{id}/order` | Reorder all items on a board |
 | `POST` · `DELETE` | `/api/boards/{id}/share` | Create / revoke a read-only board link |
@@ -649,6 +816,7 @@ All settings are environment variables (read from `.env` at the repo root or in 
 | `GET` · `POST` | `/api/monitors` | List monitors / watch a KPI (`message_id`, `index`, `direction`, `threshold`) |
 | `GET` · `PATCH` · `DELETE` | `/api/monitors/{id}` | Detail with run history / retitle, retune, pause / remove |
 | `POST` | `/api/monitors/{id}/run` · `/api/monitors/run` | Re-check one monitor / every enabled monitor |
+| `POST` | `/api/monitors/{id}/diagnose` | *Why did this metric move?* The driver drill-down on the monitor's own measure, breached or not. **No model call** |
 | `GET` | `/api/monitors/digest` · `/api/monitors/digest.md` | Current state of every monitor as JSON / a Markdown briefing |
 | `GET` | `/api/alerts` | Channels, recent deliveries and what this server can actually send |
 | `GET` · `POST` | `/api/alerts/channels` | List / add a Slack, webhook or email destination |
@@ -697,31 +865,33 @@ brief), `error` (`{code, message}`) and `done`. Keep-alive comments are sent eve
 │   │   ├── agent/        # LangGraph graph, nodes (incl. verify), prompts, schemas, LLM client,
 │   │   │                 # chat service, investigations (deep research orchestrator)
 │   │   ├── api/          # FastAPI routers (system incl. route/recall/activity, datasets incl.
-│   │   │                 # significance + scenarios, sessions + SSE chat/investigate, boards,
-│   │   │                 # monitors, alerts, share, sources, comments, briefings)
+│   │   │                 # significance + scenarios + cohorts + forecast + privacy,
+│   │   │                 # sessions + SSE chat/investigate, boards, monitors incl. diagnose,
+│   │   │                 # alerts, share, sources, comments, briefings)
 │   │   ├── core/         # settings, typed errors, logging, JSON serialisation, number
 │   │   │                 # formatting, optional workspace auth middleware
 │   │   ├── sandbox/      # AST policy, process runner + watchdog, isolated worker
-│   │   ├── services/     # ingestion, cleaning, profiling, signals, drivers, statistics,
-│   │   │                 # scenarios, memory, sources, semantics, contracts, verification,
-│   │   │                 # monitors, briefings, notifications, comments, activity, versions,
-│   │   │                 # notebook, documents (PDF/PPTX), boards, sharing, export
-│   │   ├── db.py         # SQLite persistence (datasets + lineage + contracts, sessions, boards,
-│   │   │                 # monitors, alert channels + delivery log, sources, comments,
-│   │   │                 # activity, briefings)
+│   │   ├── services/     # ingestion, cleaning, profiling, privacy, signals, drivers, statistics,
+│   │   │                 # scenarios, cohorts, forecasting, diagnosis, memory, sources, semantics,
+│   │   │                 # contracts, verification, monitors, briefings, notifications, comments,
+│   │   │                 # activity, versions, notebook, documents (PDF/PPTX), boards, sharing
+│   │   ├── db.py         # SQLite persistence (datasets + lineage + contracts + privacy policy,
+│   │   │                 # sessions, boards, monitors + runs with root cause, alert channels
+│   │   │                 # + delivery log, sources, comments, activity, briefings)
 │   │   └── main.py       # app factory (dependency-injectable LLM, sandbox & alert transport)
 │   │                     # + monitor, digest, source-refresh and briefing schedulers
 │   ├── scripts/generate_sample_data.py
 │   └── tests/            # pipeline, sandbox security, agent graph, verification, semantics,
-│                         # drivers, statistics, scenarios, memory, sources, collaboration,
-│                         # investigations, briefings, contracts, notifications, versions,
-│                         # monitors, exports, API end-to-end
+│                         # drivers, statistics, scenarios, cohorts, forecasting, privacy,
+│                         # diagnosis, memory, sources, collaboration, investigations, briefings,
+│                         # contracts, notifications, versions, monitors, exports, API end-to-end
 ├── frontend/
 │   └── src/
 │       ├── app/          # layout, page, design tokens (globals.css)
 │       ├── components/   # workspace, workspace gate, sidebar, welcome, data panel (incl.
-│       │                 # contract tab), drivers / significance / scenarios / sources /
-│       │                 # briefings / monitors views, alerts panel, comments panel,
+│       │                 # contract and privacy tabs), drivers / significance / scenarios /
+│       │                 # cohorts / forecast / sources / briefings / monitors views (the last
+│       │                 # with root cause on breach), alerts panel, comments panel,
 │       │                 # activity feed, export menu, watch, boards/*,
 │       │                 # chat/* (incl. verification badge, recall notice, investigation card),
 │       │                 # ui/*
@@ -740,7 +910,7 @@ cd backend
 pytest
 ```
 
-The suite (312 tests) covers the cleaning and profiling pipeline, proactive signals and
+The suite (414 tests) covers the cleaning and profiling pipeline, proactive signals and
 forecasting, CSV/Excel ingestion edge cases, sandbox policy and runtime escapes (file writes,
 secret leakage, timeouts), the full agent graph including the self-repair loop and graceful
 failure paths, every verification check (grounding tolerances, percent-scale bugs, ignored
@@ -779,6 +949,26 @@ behaviour that is easy to get quietly wrong:
   respected, a failed step surfaced in the caveats rather than hidden, the synthesis prompt proven
   to carry the "do not use any figure from this step" instruction, and a failed synthesis still
   leaving every completed analysis behind.
+- **Cohorts** — offset zero always being the whole cohort, unobserved cells staying `null` rather
+  than zero, the pooled curve provably averaging only over eligible cohorts, a loyal population
+  retaining measurably better than a churning one, the repeat rate reproduced from the raw frame
+  independently, cumulative value never going down, the partial final period dropped and
+  disclosed, and tiny cohorts excluded with the reason stated.
+- **Forecasting** — every candidate scored on the same number of held-out points (an unfair race
+  is not a scoreboard), the winner actually beating every complete rival, a requested method
+  overriding the backtest while still being ranked honestly against the ones it lost to, a flat
+  series falling back to the baseline and *saying so*, intervals coming from the backtest and never
+  narrowing with the horizon, a non-negative series never projecting below zero, and a short
+  history disabling seasonality with the caveat to match.
+- **Privacy** — a Luhn-failing 16-digit order number not called a card, a bare digit run not called
+  a phone unless the column says `phone`, `Air Fryer` not called a person, an unambiguous name like
+  `ssn` being enough on its own, **no raw value appearing anywhere in the scan output**, hashing
+  proven stable, irreversible and grouping-preserving, masking leaving missing values missing, and
+  — the one that matters — no personal value surviving into the schema card the model is handed.
+- **Root cause on breach** — the collapsing segment named, the measure matched from the KPI label
+  and from the code, a breach alert carrying a *Most likely driver* field, the digest explaining
+  every breach, a dataset with no dates degrading to a reason instead of a traceback, and the whole
+  thing switchable off.
 - **Collaboration and briefings** — thread flattening and cascade-resolve, cadence arithmetic,
   delivery reaching only subscribed channels, one broken briefing not stopping the sweep, and a
   protected workspace rejecting a missing or wrong token while a client-supplied name cannot
@@ -827,6 +1017,28 @@ npm run typecheck && npm run build
 - **Goal seek must be able to say no.** A solver that always returns its closest attempt teaches
   people to trust an unreachable number. Because the projection is monotonic in one lever,
   bisection can prove no value reaches the target and report the range that is actually attainable.
+- **An empty cell is not a zero.** A cohort that has not lived six months has no six-month
+  retention rate. Counting that as churn measures the calendar, not the business, and it gets
+  worse every month no matter what anyone does — so the cell stays empty and the average at each
+  offset is taken only over the cohorts old enough to be in it.
+- **No forecast without its track record.** A projection shipped alone is a number the reader has
+  to take on faith. Every method is refitted at several origins and scored on data it never saw,
+  and the interval is the spread of *those* errors rather than an assumption about the residuals
+  the model was fitted on — which is why it widens with the horizon by itself.
+- **A baseline that wins is a result.** When nothing beats naive or seasonal-naive, Numera says so
+  and shows the baseline. Dressing up a coin flip as a model is how forecasting loses its audience.
+- **Privacy that needs no decision.** Detected personal values are stripped from the stored profile
+  at upload, before anyone reads the warning — because a safeguard that waits for a click is a
+  safeguard most files never get. Redaction, which destroys data, does wait for a click.
+- **One copy of the truth.** Applying a redaction rewrites the cleaned table itself rather than
+  filtering at each endpoint. Every preview, export, share link and board tile reads that one file,
+  so none of them has to remember to filter — and none of them can forget.
+- **Pseudonyms, not deletion, by default.** Hashing a customer id keeps every join, group-by and
+  cohort intact while the real value leaves the building. A privacy control that breaks the
+  analysis is a privacy control people turn off.
+- **An alert should name a cause.** A page that says a number is wrong and stops has handed over
+  the easy half. The drill-down costs one more pass over the same table and no tokens, so it rides
+  along with the breach instead of waiting to be asked.
 - **A SQL query is untrusted input.** Read-only is enforced by parsing the statement before a
   connection opens, not by hoping the credentials are read-only — and comments and string literals
   are stripped first, so the check has neither false positives nor a trivial bypass.
@@ -847,8 +1059,9 @@ npm run typecheck && npm run build
   which is what turns a re-upload into something checked rather than merely described.
 - **Alert on transitions.** Repeating an unchanged breach trains people to ignore alerts, which is
   worse than sending none.
-- **Clients never supply pinned content.** Both pin paths — an analysis result and a drill-down —
-  are addressed by provenance and recomputed server-side before being snapshotted.
+- **Clients never supply pinned content.** Both pin paths — an analysis result and any of the five
+  deterministic views — are addressed by provenance and recomputed server-side before being
+  snapshotted.
 - **Self-correction with real feedback.** Failures return line numbers, library frames and
   available columns, which lets the agent fix most errors on the first retry.
 - **Graceful degradation.** A rate-limited write-up still shows the computed KPIs and
@@ -867,8 +1080,13 @@ npm run typecheck && npm run build
 - BigQuery and Snowflake dialects alongside the current five
 - True multi-tenancy: per-user workspaces with row-level ownership, beyond the current
   team-level token gate
-- Drill-down straight from a breached monitor, using the KPI's own measure column
 - Contract expectations on relationships between columns, not just single ones
-- Cohort and retention analysis as a fourth deterministic view
 - Sequential testing for significance, so a scan can be watched over time without inflating
   its own false-discovery rate
+- Cohort *segmentation* — the same grid split by acquisition channel or plan, so "which
+  cohorts retain" becomes "which kind of customer retains"
+- Hierarchical forecasts that reconcile: segment projections summing to the total exactly,
+  the way the drill-down's three terms already do
+- Differential privacy on aggregate exports, for the case where even a group-by leaks
+- A monitor that watches a *cohort curve* rather than a single number, so a retention
+  regression is caught the month it starts

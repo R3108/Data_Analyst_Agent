@@ -15,6 +15,7 @@ from typing import Any
 from app.core.config import Settings
 from app.core.errors import InvalidInputError, NotFoundError
 from app.db import Database
+from app.services import diagnosis
 from app.services.datasets import DatasetService
 
 logger = logging.getLogger(__name__)
@@ -156,11 +157,41 @@ class MonitorService:
             change_pct = (value - float(previous)) / abs(float(previous))
 
         breached, detail = self._evaluate(monitor, value, change_pct)
+        # "Revenue is below target" is half an answer; the drill-down that says which
+        # segment did it costs one more pass over the same table and no tokens at all.
+        root_cause = self._diagnose(monitor, target) if breached else None
         return self._record(
             monitor, status="breached" if breached else "ok", dataset_id=target["id"],
             value=value, previous_value=previous, change_pct=change_pct, breached=breached,
-            detail=detail, duration_ms=result.duration_ms,
+            detail=detail, duration_ms=result.duration_ms, root_cause=root_cause,
         )
+
+    def diagnose(self, monitor_id: str, measure: str | None = None) -> dict[str, Any]:
+        """Explain this monitor's metric on demand, breached or not. No model call."""
+        monitor = self.require(monitor_id)
+        target = self.db.latest_dataset_version(monitor["dataset_id"])
+        if target is None:
+            raise NotFoundError("The dataset this monitor watches no longer exists.")
+        return self._diagnose(monitor, target, measure=measure) or {
+            "status": "unavailable",
+            "reason": "The drill-down could not be computed for this dataset.",
+            "contributors": [],
+            "summary": None,
+        }
+
+    def _diagnose(self, monitor: dict[str, Any], target: dict[str, Any],
+                  measure: str | None = None) -> dict[str, Any] | None:
+        if not self.settings.monitor_root_cause:
+            return None
+        try:
+            frame = self.datasets.load_frame(target["id"])
+        except NotFoundError:
+            return None
+        try:
+            return diagnosis.diagnose(monitor, target["profile"], frame, measure=measure)
+        except Exception:  # noqa: BLE001 — an explanation must never fail a check
+            logger.info("Root-cause analysis failed for monitor %s", monitor["id"], exc_info=True)
+            return None
 
     def run_many(self, monitor_ids: list[str]) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
@@ -226,6 +257,9 @@ class MonitorService:
                     f"- **{monitor['title']}** — {monitor['formatted_value']} "
                     f"({monitor['rule']}){' · ' + monitor['last_detail'] if monitor.get('last_detail') else ''}"
                 )
+                cause = monitor.get("root_cause") or {}
+                if status == "breached" and cause.get("status") == "ok":
+                    lines.append(f"  - Why: {cause['summary']}")
             lines.append("")
         pending = [m for m in digest["monitors"] if m["last_status"] not in ("ok", "breached", "error")]
         if pending:
@@ -286,13 +320,14 @@ class MonitorService:
         breached: bool = False,
         detail: str | None = None,
         duration_ms: int | None = None,
+        root_cause: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         previous_status = monitor.get("last_status")
         run = self.db.add_monitor_run(
             monitor["id"],
             {"dataset_id": dataset_id, "value": value, "previous_value": previous_value,
              "change_pct": change_pct, "status": status, "breached": breached, "detail": detail,
-             "duration_ms": duration_ms},
+             "duration_ms": duration_ms, "root_cause": root_cause},
             history_limit=self.settings.monitor_history_limit,
         )
         self.db.update_monitor(
@@ -328,6 +363,11 @@ class MonitorService:
             "history": history,
             "last_detail": (latest or {}).get("detail"),
             "last_change_pct": (latest or {}).get("change_pct"),
+            # The most recent explanation, which survives a later "ok" run so a reader can
+            # still see what the breach was about.
+            "root_cause": next(
+                (r["root_cause"] for r in reversed(runs) if r.get("root_cause")), None
+            ),
             "formatted_value": _format(monitor.get("last_value"), monitor.get("kpi_format")),
             "rule": _rule_text(monitor),
         }

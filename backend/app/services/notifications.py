@@ -25,6 +25,7 @@ from typing import Any, Protocol
 from app.core.config import Settings
 from app.core.errors import InvalidInputError, NotFoundError
 from app.db import Database
+from app.services import diagnosis
 
 logger = logging.getLogger(__name__)
 
@@ -265,9 +266,14 @@ class NotificationService:
             ("Dataset", monitor.get("dataset_name") or "—"),
         ]
         if status == "breached":
-            return Alert("breach", f"{monitor['title']} is outside its range",
-                         run.get("detail") or "The monitor breached its threshold.",
-                         "critical", facts, link)
+            # A breach alert that cannot say why is a page at 3am with no next step, so
+            # the deterministic drill-down rides along when there is one.
+            cause = run.get("root_cause") or {}
+            summary = run.get("detail") or "The monitor breached its threshold."
+            if cause.get("status") == "ok":
+                summary = f"{summary}\n{cause['summary']}"
+            return Alert("breach", f"{monitor['title']} is outside its range", summary,
+                         "critical", facts + diagnosis.alert_facts(cause), link)
         if status == "error":
             return Alert("failure", f"{monitor['title']} could not be checked",
                          run.get("detail") or "The snapshotted analysis no longer runs.",
@@ -306,8 +312,13 @@ class NotificationService:
             f"{digest['total']} monitor(s): {counts['breached']} breached, "
             f"{counts['ok']} within range, {counts['error']} failing."
         )
-        facts = [(m["title"], f"{m['formatted_value']} — {m.get('last_detail') or m['rule']}")
-                 for m in breached[:6]]
+        facts = []
+        for monitor in breached[:6]:
+            cause = monitor.get("root_cause") or {}
+            detail = monitor.get("last_detail") or monitor["rule"]
+            if cause.get("status") == "ok":
+                detail = f"{detail}\n{cause['summary']}"
+            facts.append((monitor["title"], f"{monitor['formatted_value']} — {detail}"))
         return Alert(
             "digest",
             "Numera monitor briefing",

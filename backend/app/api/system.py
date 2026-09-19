@@ -31,7 +31,11 @@ def health(settings: Settings = Depends(get_settings_dep)) -> dict[str, Any]:
         "model": settings.openai_model,
         "llm_credentials_detected": settings.llm_credentials_detected,
         "sandbox": {"timeout_s": settings.sandbox_timeout_s, "memory_mb": settings.sandbox_memory_mb},
-        "monitors": {"interval_minutes": settings.monitor_interval_minutes},
+        "monitors": {
+            "interval_minutes": settings.monitor_interval_minutes,
+            "root_cause": settings.monitor_root_cause,
+        },
+        "privacy": {"scan_enabled": settings.privacy_scan_enabled},
         "alerts": {
             "enabled": settings.alerts_enabled,
             "email_configured": bool(settings.smtp_host),

@@ -93,3 +93,18 @@ async def run_monitor(monitor_id: str,
                       monitors: MonitorService = Depends(get_monitors)) -> dict[str, Any]:
     monitors.require(monitor_id)
     return await run_in_threadpool(monitors.run, monitor_id)
+
+
+@router.post("/{monitor_id}/diagnose")
+async def diagnose_monitor(
+    monitor_id: str,
+    measure: str | None = Query(default=None),
+    monitors: MonitorService = Depends(get_monitors),
+) -> dict[str, Any]:
+    """Why did this metric move? The driver drill-down on the monitor's own measure.
+
+    Runs on demand whether or not the monitor is breached, so the answer is available
+    before the next sweep. Deterministic — no model call, no tokens.
+    """
+    monitors.require(monitor_id)
+    return await run_in_threadpool(monitors.diagnose, monitor_id, measure)

@@ -72,6 +72,15 @@ class Settings(BaseSettings):
     # can still be run on demand and always re-run when a new dataset version arrives.
     monitor_interval_minutes: int = Field(default=0, ge=0, le=1440)
     monitor_history_limit: int = Field(default=60, ge=5, le=500)
+    # When a monitor breaches, run the deterministic driver drill-down on its measure and
+    # attach the result to the run and the alert. Costs one pass over the cleaned table
+    # and zero tokens; set to false if a very large table makes the sweep too slow.
+    monitor_root_cause: bool = True
+
+    # --- Privacy guard --------------------------------------------------------------
+    # Personal data is detected at upload and its example values are withheld from every
+    # prompt regardless of this setting. This controls whether the *detector* runs at all.
+    privacy_scan_enabled: bool = True
 
     # --- Alerts ------------------------------------------------------------------
     # Delivery of monitor breaches, recoveries and failed data contracts. Channels are

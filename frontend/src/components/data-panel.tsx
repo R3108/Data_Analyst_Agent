@@ -6,12 +6,16 @@ import {
   ChevronDown,
   CloudUpload,
   Download,
+  EyeOff,
   FingerprintPattern,
   Hash,
   Layers,
   LoaderCircle,
+  Lock,
   Plus,
+  ScanEye,
   Search,
+  ShieldAlert,
   ShieldCheck,
   ToggleLeft,
   Trash,
@@ -36,6 +40,9 @@ import type {
   KpiFormat,
   MetricDefinition,
   Preview,
+  PrivacyAction,
+  PrivacyReport,
+  PrivacySeverity,
   Semantics,
   VersionDiff,
 } from "@/lib/types";
@@ -45,6 +52,7 @@ export type DataTab =
   | "columns"
   | "metrics"
   | "contract"
+  | "privacy"
   | "cleaning"
   | "versions"
   | "preview";
@@ -54,6 +62,7 @@ const TABS: { id: DataTab; label: string }[] = [
   { id: "columns", label: "Columns" },
   { id: "metrics", label: "Metrics" },
   { id: "contract", label: "Contract" },
+  { id: "privacy", label: "Privacy" },
   { id: "cleaning", label: "Cleaning" },
   { id: "versions", label: "Versions" },
   { id: "preview", label: "Preview" },
@@ -80,6 +89,7 @@ export function DataPanel({
   onClose,
   onSemanticsChange,
   onUploadVersion,
+  onDatasetChanged,
 }: {
   dataset: Dataset;
   tab: DataTab;
@@ -87,6 +97,8 @@ export function DataPanel({
   onClose: () => void;
   onSemanticsChange?: (semantics: Semantics) => void;
   onUploadVersion?: (file: File) => void;
+  /** Applying a redaction rewrites the table, so the open copy has to be reloaded. */
+  onDatasetChanged?: () => void;
 }) {
   return (
     <>
@@ -105,18 +117,17 @@ export function DataPanel({
           </IconButton>
         </div>
 
-        {/* Seven tabs at their natural widths do not fit the panel, so they share it evenly on one
-            row rather than wrapping a lone tab onto a second line. */}
-        <div className="grid shrink-0 grid-cols-7 border-b border-line px-1 py-1.5" role="tablist">
+        {/* Eight tabs do not fit one row of a 400px panel without truncating every label to
+            four letters, so they wrap. A readable second row beats "Contr…" and "Previ…". */}
+        <div className="flex shrink-0 flex-wrap gap-0.5 border-b border-line px-1.5 py-1.5" role="tablist">
           {TABS.map((t) => (
             <button
               key={t.id}
               role="tab"
               aria-selected={tab === t.id}
               onClick={() => onTabChange(t.id)}
-              title={t.label}
               className={cn(
-                "truncate rounded-md px-1 py-1 text-[12px] font-medium transition",
+                "rounded-md px-2 py-1 text-[12px] font-medium whitespace-nowrap transition",
                 tab === t.id ? "bg-muted text-ink" : "text-ink-3 hover:bg-muted/60 hover:text-ink",
               )}
             >
@@ -130,6 +141,7 @@ export function DataPanel({
           {tab === "columns" && <Columns dataset={dataset} />}
           {tab === "metrics" && <Metrics dataset={dataset} onSaved={onSemanticsChange} />}
           {tab === "contract" && <Contract dataset={dataset} />}
+          {tab === "privacy" && <Privacy dataset={dataset} onApplied={onDatasetChanged} />}
           {tab === "cleaning" && <Cleaning dataset={dataset} />}
           {tab === "versions" && <Versions dataset={dataset} onUploadVersion={onUploadVersion} />}
           {tab === "preview" && <PreviewTab datasetId={dataset.id} />}
@@ -315,6 +327,302 @@ function columnIcon(column: ColumnProfile) {
   return Type;
 }
 
+const SEVERITY_TONE: Record<PrivacySeverity, "bad" | "warn" | "neutral"> = {
+  high: "bad",
+  medium: "warn",
+  low: "neutral",
+};
+
+const ACTION_HINT: Record<PrivacyAction, string> = {
+  keep: "Leave the values exactly as they are.",
+  mask: "Replace each value in place, keeping its shape and last few characters.",
+  hash: "Replace with a stable salted pseudonym — grouping, joins and retention still work.",
+  drop: "Remove the column from the table entirely.",
+};
+
+/**
+ * The privacy guard. Detection happens at upload and withholds example values from every
+ * prompt without anyone pressing anything; this tab is where the second half — actually
+ * rewriting the table — is decided and audited.
+ */
+function Privacy({ dataset, onApplied }: { dataset: Dataset; onApplied?: () => void }) {
+  const toast = useToast();
+  const [report, setReport] = useState<PrivacyReport | null>(null);
+  const [draft, setDraft] = useState<Record<string, PrivacyAction>>({});
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState<"save" | "apply" | "scan" | null>(null);
+
+  const adopt = (next: PrivacyReport) => {
+    setReport(next);
+    const policy: Record<string, PrivacyAction> = {};
+    for (const finding of next.scan.findings) {
+      policy[finding.column] = next.state.policy[finding.column] ?? "keep";
+    }
+    // A policy may name a column the scan did not flag — the user's judgement outranks it.
+    for (const [column, action] of Object.entries(next.state.policy)) policy[column] = action;
+    setDraft(policy);
+  };
+
+  useEffect(() => {
+    setLoading(true);
+    api
+      .getPrivacy(dataset.id)
+      .then(adopt)
+      .catch(() => undefined)
+      .finally(() => setLoading(false));
+  }, [dataset.id]);
+
+  const act = async (
+    kind: "save" | "apply" | "scan",
+    run: () => Promise<PrivacyReport>,
+    success: [string, string],
+  ) => {
+    setBusy(kind);
+    try {
+      adopt(await run());
+      toast.success(success[0], success[1]);
+      if (kind === "apply") onApplied?.();
+    } catch (error) {
+      toast.error(
+        "Couldn't update the privacy policy",
+        error instanceof ApiError ? error.message : "Please try again.",
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (loading) return <div className="h-40 animate-pulse rounded-lg bg-muted" />;
+  if (!report) return <p className="text-[13px] text-ink-3">The privacy scan is unavailable.</p>;
+
+  const { scan, state } = report;
+  const applied = report.applied;
+  const dirty =
+    JSON.stringify(Object.entries(draft).filter(([, a]) => a !== "keep").sort()) !==
+    JSON.stringify(Object.entries(state.policy).sort());
+  const planned = Object.entries(draft).filter(([, action]) => action !== "keep");
+  const tone =
+    scan.status === "sensitive" ? "bad" : scan.status === "review" ? "warn" : "good";
+
+  return (
+    <div className="space-y-5">
+      <div
+        className={cn(
+          "flex items-start gap-2.5 rounded-lg border p-3",
+          tone === "bad"
+            ? "border-bad/30 bg-bad-soft"
+            : tone === "warn"
+              ? "border-warn/30 bg-warn-soft"
+              : "border-good/30 bg-good-soft",
+        )}
+      >
+        <ShieldAlert
+          className={cn(
+            "mt-px size-4 shrink-0",
+            tone === "bad" ? "text-bad" : tone === "warn" ? "text-warn" : "text-good",
+          )}
+        />
+        <div className="min-w-0">
+          <p className="text-[13px] leading-snug font-medium text-ink">{scan.headline}</p>
+          <p className="mt-0.5 text-[11.5px] text-ink-2">
+            {scan.scanned_columns} columns scanned · {scan.counts.high} high · {scan.counts.medium}{" "}
+            medium · {scan.counts.low} low
+          </p>
+        </div>
+      </div>
+
+      {dataset.profile.withheld_columns?.length ? (
+        <div className="flex items-start gap-2.5 rounded-lg border border-line bg-subtle p-3">
+          <EyeOff className="mt-px size-4 shrink-0 text-ink-3" />
+          <p className="text-[12px] leading-relaxed text-ink-2">
+            Example values for{" "}
+            <span className="font-medium text-ink">
+              {dataset.profile.withheld_columns.join(", ")}
+            </span>{" "}
+            are already withheld from every prompt. The model is told the columns exist and what
+            they are for, and never sees a value — whatever you decide below.
+          </p>
+        </div>
+      ) : null}
+
+      {applied && (
+        <div>
+          <SectionLabel icon={<Check className="size-3.5" />}>
+            Redaction applied {state.applied_at ? relativeTime(state.applied_at) : ""}
+          </SectionLabel>
+          <ul className="space-y-1.5 rounded-lg border border-line p-3">
+            {state.applied.map((entry) => (
+              <li key={entry.column} className="text-[12px] leading-relaxed text-ink-2">
+                <span className="font-medium text-ink">{entry.column}</span> → {entry.action}
+                {entry.status === "missing" && " (column not present)"}
+                <span className="block text-[11px] text-ink-3">{entry.detail}</span>
+              </li>
+            ))}
+          </ul>
+          {state.raw_purged && (
+            <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-3">
+              The original uploaded file was deleted too — keeping it would have defeated the
+              redaction. Every version filed after this one inherits the same policy and salt.
+            </p>
+          )}
+        </div>
+      )}
+
+      {scan.findings.length === 0 ? (
+        <p className="text-[13px] leading-relaxed text-ink-3">
+          No column matched a personal-data pattern. Detection recognises what it knows —
+          a free-text column can still hold something no pattern can see.
+        </p>
+      ) : (
+        <div>
+          <div className="mb-2.5 flex items-center justify-between">
+            <SectionLabel>What to do with each column</SectionLabel>
+            <button
+              onClick={() => setDraft({ ...draft, ...scan.suggested_policy })}
+              className="mb-2.5 text-[12px] text-accent hover:underline"
+            >
+              Use suggestions
+            </button>
+          </div>
+          <ul className="space-y-2">
+            {scan.findings.map((finding) => (
+              <li key={finding.column} className="rounded-lg border border-line p-3">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="min-w-0 truncate font-mono text-[12.5px] text-ink">
+                    {finding.column}
+                  </span>
+                  <Badge tone={SEVERITY_TONE[finding.severity]}>{finding.label}</Badge>
+                  <span className="ml-auto text-[11px] text-ink-3 tabular-nums">
+                    {(finding.confidence * 100).toFixed(0)}% · {finding.basis}
+                  </span>
+                </div>
+                <p className="mt-1 text-[11.5px] leading-relaxed text-ink-2">{finding.why}</p>
+                {finding.shape && (
+                  <p
+                    className="mt-1 font-mono text-[11px] text-ink-3"
+                    title="The structure of a value — letters as a, digits as 9. Never a real value."
+                  >
+                    looks like {finding.shape}
+                  </p>
+                )}
+                <div className="mt-2 grid grid-cols-4 gap-1">
+                  {(["keep", "mask", "hash", "drop"] as PrivacyAction[]).map((action) => (
+                    <button
+                      key={action}
+                      disabled={applied}
+                      title={ACTION_HINT[action]}
+                      onClick={() => setDraft({ ...draft, [finding.column]: action })}
+                      className={cn(
+                        "rounded-md px-1.5 py-1 text-[11.5px] font-medium capitalize transition disabled:opacity-50",
+                        (draft[finding.column] ?? "keep") === action
+                          ? "bg-accent text-white"
+                          : "bg-muted text-ink-2 hover:text-ink",
+                      )}
+                    >
+                      {action}
+                    </button>
+                  ))}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2 border-t border-line pt-4">
+        {!applied && (
+          <>
+            <Button
+              size="sm"
+              variant="secondary"
+              loading={busy === "save"}
+              disabled={!dirty || busy !== null}
+              onClick={() =>
+                void act(
+                  "save",
+                  () =>
+                    api.savePrivacy(
+                      dataset.id,
+                      Object.fromEntries(planned) as Record<string, PrivacyAction>,
+                    ),
+                  ["Policy saved", "The table is untouched until you apply it."],
+                )
+              }
+            >
+              Save policy
+            </Button>
+            <Button
+              size="sm"
+              variant="primary"
+              loading={busy === "apply"}
+              disabled={busy !== null || (!planned.length && !state.policy)}
+              onClick={() => {
+                const columns = planned.length
+                  ? planned.map(([column, action]) => `${column} → ${action}`)
+                  : Object.entries(state.policy).map(([c, a]) => `${c} → ${a}`);
+                if (!columns.length) {
+                  toast.error("Nothing to redact", "Choose mask, hash or drop for a column first.");
+                  return;
+                }
+                if (
+                  !window.confirm(
+                    `Rewrite this table permanently?\n\n${columns.join(
+                      "\n",
+                    )}\n\nThe original upload is deleted too, and this cannot be undone.`,
+                  )
+                ) {
+                  return;
+                }
+                void act(
+                  "apply",
+                  async () => {
+                    if (dirty) {
+                      await api.savePrivacy(
+                        dataset.id,
+                        Object.fromEntries(planned) as Record<string, PrivacyAction>,
+                      );
+                    }
+                    return api.applyPrivacy(dataset.id);
+                  },
+                  ["Table redacted", "Every preview, export and share link now reads the new table."],
+                );
+              }}
+            >
+              <Lock className="size-3.5" />
+              Apply to the table
+            </Button>
+          </>
+        )}
+        <Button
+          size="sm"
+          loading={busy === "scan"}
+          disabled={busy !== null}
+          onClick={() =>
+            void act("scan", () => api.scanPrivacy(dataset.id), [
+              "Re-scanned",
+              "Detection re-ran against the table as it stands now.",
+            ])
+          }
+        >
+          <ScanEye className="size-3.5" />
+          Re-scan
+        </Button>
+        <Button size="sm" onClick={() => void api.downloadPrivacy(dataset.id)}>
+          <Download className="size-3.5" />
+          Export review
+        </Button>
+      </div>
+      {!applied && planned.length > 0 && (
+        <p className="text-[11.5px] leading-relaxed text-ink-3">
+          Applying rewrites the one cleaned table that the preview, the sandbox, every export and
+          every share link all read — so none of them has to remember to filter, and none of them
+          can forget.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function Columns({ dataset }: { dataset: Dataset }) {
   const [query, setQuery] = useState("");
   const columns = dataset.profile.columns.filter((c) => c.name.toLowerCase().includes(query.toLowerCase()));
@@ -350,6 +658,12 @@ function ColumnRow({ column, rows }: { column: ColumnProfile; rows: number }) {
       <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left hover:bg-muted/50">
         <Icon className="size-3.5 shrink-0 text-ink-3" />
         <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{column.name}</span>
+        {column.sensitive && (
+          <EyeOff
+            className="size-3.5 shrink-0 text-warn"
+            aria-label="Personal data: example values are withheld from every prompt"
+          />
+        )}
         <Badge tone={column.role === "measure" ? "accent" : "neutral"}>{column.role}</Badge>
         <ChevronDown className={cn("size-3.5 shrink-0 text-ink-3 transition-transform", open && "rotate-180")} />
       </button>
@@ -362,6 +676,12 @@ function ColumnRow({ column, rows }: { column: ColumnProfile; rows: number }) {
             <span>·</span>
             <span className={column.missing ? "text-warn" : undefined}>{column.missing_pct}% missing</span>
           </div>
+          {column.sensitive && (
+            <p className="rounded-md bg-warn-soft px-2 py-1.5 leading-relaxed text-ink-2">
+              Flagged as personal data. Example values are withheld from every prompt; the Privacy
+              tab decides whether they are also removed from the table.
+            </p>
+          )}
           {numeric && stats.min !== undefined && (
             <div className="grid grid-cols-4 gap-2">
               {(["min", "median", "mean", "max"] as const).map((key) => (

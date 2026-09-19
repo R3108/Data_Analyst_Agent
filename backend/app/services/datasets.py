@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -16,6 +17,7 @@ from app.core.errors import InvalidInputError, NotFoundError, PayloadTooLargeErr
 from app.core.serialization import frame_to_records
 from app.db import Database, new_id, utcnow
 from app.services import contracts as contract_service
+from app.services import privacy as privacy_service
 from app.services.cleaning import clean_dataframe
 from app.services.ingestion import detect_file_type, read_table
 from app.services.profiling import profile_dataframe
@@ -69,6 +71,12 @@ class DatasetService:
                 f"Dataset has {raw.shape[1]} columns; the limit is {self.settings.max_columns}."
             )
 
+        # Resolved up front: a replacement upload inherits the previous version's
+        # redaction policy, and that has to be applied *before* anything is profiled,
+        # stored or shown — otherwise next month's export quietly re-introduces the
+        # personal data last month's redaction removed.
+        previous = self.latest_version(replaces) if replaces else None
+
         clean, cleaning = clean_dataframe(raw)
         if clean.empty:
             raise InvalidInputError("No usable rows remain after removing empty rows.")
@@ -85,15 +93,34 @@ class DatasetService:
                 "step": "skip_malformed_lines", "column": None, "affected": ingest.skipped_lines,
                 "detail": f"Skipped {ingest.skipped_lines:,} malformed line(s) with the wrong number of fields",
             })
+        privacy = (previous or {}).get("privacy")
+        if privacy and privacy.get("policy") and privacy.get("applied_at"):
+            clean, applied = privacy_service.apply_policy(clean, privacy)
+            privacy = {**privacy, "applied_at": utcnow(), "applied": applied, "raw_purged": True}
+            cleaning["actions"].append({
+                "step": "redact_personal_data", "column": None, "affected": len(applied),
+                "detail": "Re-applied the inherited privacy policy to "
+                          + ", ".join(f"{a['column']} ({a['action']})" for a in applied[:6]),
+            })
+
         profile = profile_dataframe(clean)
         profile["signals"] = detect_signals(clean, profile)
+        privacy_scan = self._scan(clean, profile, privacy)
+        # Example values for anything directly identifying never enter the stored profile,
+        # which is the object the model's schema card is built from. No decision required.
+        profile = privacy_service.shield_profile(
+            profile, privacy_service.protected_columns(privacy_scan)
+        )
 
         dataset_id = new_id("ds")
         target_dir = self.settings.datasets_dir / dataset_id
         target_dir.mkdir(parents=True, exist_ok=True)
         try:
             clean.to_parquet(target_dir / "clean.parquet", index=False)
-            shutil.copyfile(path, target_dir / f"raw{Path(filename).suffix.lower()}")
+            if not (privacy or {}).get("raw_purged"):
+                # The original file is kept for provenance — unless a redaction has been
+                # applied, in which case keeping it would defeat the redaction.
+                shutil.copyfile(path, target_dir / f"raw{Path(filename).suffix.lower()}")
         except Exception:
             shutil.rmtree(target_dir, ignore_errors=True)
             raise
@@ -118,8 +145,7 @@ class DatasetService:
         semantics: dict[str, Any] | None = None
         contract: dict[str, Any] | None = None
         version_diff: dict[str, Any] | None = None
-        if replaces:
-            previous = self.latest_version(replaces)
+        if previous is not None:
             record.update(
                 name=name or previous["name"],
                 parent_dataset_id=previous["id"],
@@ -146,12 +172,16 @@ class DatasetService:
             "version_diff_json": json.dumps(version_diff) if version_diff else None,
             "contract_json": json.dumps(contract) if contract else None,
             "contract_result_json": json.dumps(contract_result) if contract_result else None,
+            "privacy_json": json.dumps(privacy) if privacy else None,
+            "privacy_scan_json": json.dumps(privacy_scan),
         })
-        logger.info("Ingested dataset %s v%s (%s rows × %s cols)%s", dataset_id, record["version"],
+        logger.info("Ingested dataset %s v%s (%s rows × %s cols)%s%s", dataset_id, record["version"],
                     record["n_rows"], record["n_cols"],
-                    f" — contract {contract_result['status']}" if contract_result else "")
+                    f" — contract {contract_result['status']}" if contract_result else "",
+                    f" — privacy {privacy_scan['status']}" if privacy_scan["findings"] else "")
         return {**record, "profile": profile, "cleaning": cleaning, "semantics": semantics,
-                "version_diff": version_diff, "contract": contract, "contract_result": contract_result}
+                "version_diff": version_diff, "contract": contract, "contract_result": contract_result,
+                "privacy": privacy, "privacy_scan": privacy_scan}
 
     def get(self, dataset_id: str) -> dict[str, Any]:
         record = self.db.get_dataset(dataset_id)
@@ -219,6 +249,107 @@ class DatasetService:
         self.db.update_dataset_contract(dataset_id, contract, result)
         return {"contract": contract or dict(contract_service.EMPTY), "result": result,
                 "suggested": contract_service.is_empty(contract)}
+
+    # --- privacy guard --------------------------------------------------------------
+    def get_privacy(self, dataset_id: str) -> dict[str, Any]:
+        """The scan, the policy and whether the table has actually been rewritten."""
+        record = self.get(dataset_id)
+        scan_result = record.get("privacy_scan")
+        if scan_result is None:
+            # Datasets ingested before the guard existed are scanned once, lazily.
+            scan_result = self._rescan(dataset_id, record)
+        state = record.get("privacy") or dict(privacy_service.EMPTY)
+        return {
+            "scan": scan_result,
+            "state": state,
+            "applied": bool(state.get("applied_at")),
+            "suggested": privacy_service.is_empty(state),
+        }
+
+    def scan_privacy(self, dataset_id: str) -> dict[str, Any]:
+        """Re-run detection against the table as it stands now."""
+        record = self.get(dataset_id)
+        self._rescan(dataset_id, record)
+        return self.get_privacy(dataset_id)
+
+    def set_privacy(self, dataset_id: str, payload: Any) -> dict[str, Any]:
+        """Record what should happen to each column. Nothing is rewritten yet."""
+        record = self.get(dataset_id)
+        state = privacy_service.normalize(payload, previous=record.get("privacy"))
+        unknown = [c for c in state["policy"] if c not in self.load_frame(dataset_id).columns]
+        if unknown:
+            raise InvalidInputError(f"Column '{unknown[0]}' is not in this dataset.")
+        self.db.update_dataset_privacy(dataset_id, state if state["policy"] else None)
+        return self.get_privacy(dataset_id)
+
+    def apply_privacy(self, dataset_id: str) -> dict[str, Any]:
+        """Rewrite the cleaned table under the policy — the one copy everything reads.
+
+        Doing it here, once, is what makes the guarantee hold: the preview, the sandbox,
+        every export, every share link and every board tile read this file. None of them
+        has to remember to filter, so none of them can forget.
+        """
+        record = self.get(dataset_id)
+        state = record.get("privacy") or dict(privacy_service.EMPTY)
+        if privacy_service.is_empty(state):
+            raise InvalidInputError(
+                "No privacy policy is set for this dataset, so there is nothing to redact."
+            )
+
+        frame = self.load_frame(dataset_id)
+        redacted, applied = privacy_service.apply_policy(frame, state)
+        if redacted.empty or not redacted.shape[1]:
+            raise InvalidInputError(
+                "That policy would drop every column. Mask or hash instead of dropping."
+            )
+
+        path = self.data_path(dataset_id)
+        staging = path.with_name("clean.redacted.parquet")
+        redacted.to_parquet(staging, index=False)
+        os.replace(staging, path)
+        # The original upload still holds what was just removed, so it goes too.
+        purged = 0
+        for leftover in path.parent.glob("raw.*"):
+            leftover.unlink(missing_ok=True)
+            purged += 1
+
+        profile = profile_dataframe(redacted)
+        profile["signals"] = detect_signals(redacted, profile)
+        scan_result = self._scan(redacted, profile, state)
+        profile = privacy_service.shield_profile(
+            profile, privacy_service.protected_columns(scan_result)
+        )
+        state = {**state, "applied_at": utcnow(), "applied": applied, "raw_purged": bool(purged)}
+
+        self.db.update_dataset_profile(dataset_id, profile)
+        self.db.update_dataset_privacy(dataset_id, state, scan_result)
+        self.db.update_dataset_shape(dataset_id, n_rows=int(len(redacted)), n_cols=int(redacted.shape[1]))
+        logger.info("Applied privacy policy to dataset %s: %s column(s) redacted", dataset_id,
+                    len(applied))
+        return self.get_privacy(dataset_id)
+
+    def _scan(self, frame: pd.DataFrame, profile: dict[str, Any],
+              previous: dict[str, Any] | None) -> dict[str, Any]:
+        if not self.settings.privacy_scan_enabled:
+            return privacy_service.empty_scan(int(frame.shape[1]))
+        return privacy_service.scan(frame, profile, previous)
+
+    def _rescan(self, dataset_id: str, record: dict[str, Any]) -> dict[str, Any]:
+        try:
+            frame = self.load_frame(dataset_id)
+        except NotFoundError:
+            return privacy_service.empty_scan(
+                0, "The data file for this dataset is missing, so it could not be scanned."
+            )
+        profile = profile_dataframe(frame)
+        profile["signals"] = record["profile"].get("signals") or []
+        scan_result = self._scan(frame, profile, record.get("privacy"))
+        shielded = privacy_service.shield_profile(
+            profile, privacy_service.protected_columns(scan_result)
+        )
+        self.db.update_dataset_profile(dataset_id, shielded)
+        self.db.update_dataset_privacy(dataset_id, record.get("privacy"), scan_result)
+        return scan_result
 
     def export_bytes(self, dataset_id: str, fmt: str = "csv") -> tuple[bytes, str, str]:
         """The cleaned table as bytes, so exported notebooks can reproduce every figure."""

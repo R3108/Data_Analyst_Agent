@@ -18,6 +18,8 @@ import {
   Split,
   Sun,
   Trash,
+  TrendingUp,
+  Users,
   X,
 } from "lucide-react";
 import { useState } from "react";
@@ -66,6 +68,20 @@ const VIEWS: {
     label: "Scenarios",
     icon: <SlidersHorizontal className="size-3.5" />,
     hint: "Model what would move the number, or solve for a target",
+    needsDataset: true,
+  },
+  {
+    kind: "cohorts",
+    label: "Retention",
+    icon: <Users className="size-3.5" />,
+    hint: "Group everyone by when they arrived and follow each cohort forward",
+    needsDataset: true,
+  },
+  {
+    kind: "forecast",
+    label: "Forecast",
+    icon: <TrendingUp className="size-3.5" />,
+    hint: "Project a measure forward, with the walk-forward backtest that chose the method",
     needsDataset: true,
   },
   {

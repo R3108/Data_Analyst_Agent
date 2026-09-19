@@ -12,8 +12,10 @@ import {
   LoaderCircle,
   Notebook,
   Radar,
+  ShieldAlert,
   ShieldCheck,
   Sparkles,
+  Users,
   WandSparkles,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -48,8 +50,18 @@ const FEATURES = [
   },
   {
     icon: ChartSpline,
-    title: "Built-in forecasting",
-    body: "Project any metric forward with trend and seasonality, complete with confidence ranges.",
+    title: "Forecasts with a track record",
+    body: "Eight methods are refitted at several points in the past and scored on periods they never saw — so a projection arrives with the margin by which it beat doing nothing.",
+  },
+  {
+    icon: Users,
+    title: "Retention, honestly measured",
+    body: "Follow each cohort forward. A cohort too young to have a six-month rate leaves that cell empty instead of counting it as churn.",
+  },
+  {
+    icon: ShieldAlert,
+    title: "Personal data never reaches the model",
+    body: "Emails, card numbers and phone numbers are found the moment a file lands, and their values are withheld from every prompt before you decide anything.",
   },
   {
     icon: LayoutDashboard,

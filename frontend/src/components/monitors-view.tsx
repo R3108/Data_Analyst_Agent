@@ -9,6 +9,7 @@ import {
   Pause,
   Play,
   RefreshCw,
+  Split,
   Trash,
   TriangleAlert,
 } from "lucide-react";
@@ -20,8 +21,8 @@ import { Badge, Button, IconButton, SectionLabel } from "@/components/ui/primiti
 import { useToast } from "@/components/ui/toast";
 import { ApiError, api } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { formatDelta, relativeTime } from "@/lib/format";
-import type { Monitor, MonitorDigest } from "@/lib/types";
+import { formatDelta, formatValue, relativeTime } from "@/lib/format";
+import type { DriverQuery, Monitor, MonitorDigest, RootCause } from "@/lib/types";
 
 const STATUS: Record<string, { label: string; tone: "good" | "bad" | "warn" | "neutral" }> = {
   ok: { label: "Within range", tone: "good" },
@@ -34,10 +35,13 @@ const STATUS: Record<string, { label: string; tone: "good" | "bad" | "warn" | "n
 export function MonitorsView({
   onOpenSession,
   onChanged,
+  onExplain,
   emailConfigured,
 }: {
   onOpenSession: (sessionId: string) => void;
   onChanged?: (digest: MonitorDigest) => void;
+  /** Open the full drill-down, pre-aimed at whatever the breach was about. */
+  onExplain?: (datasetId: string, query: DriverQuery) => void;
   emailConfigured?: boolean;
 }) {
   const toast = useToast();
@@ -193,6 +197,7 @@ export function MonitorsView({
                     onToggle={() => void toggle(monitor)}
                     onRemove={() => remove(monitor)}
                     onOpenSession={onOpenSession}
+                    onExplain={onExplain}
                   />
                 ))}
               </div>
@@ -239,6 +244,7 @@ function MonitorCard({
   onToggle,
   onRemove,
   onOpenSession,
+  onExplain,
 }: {
   monitor: Monitor;
   busy: boolean;
@@ -247,6 +253,7 @@ function MonitorCard({
   onToggle: () => void;
   onRemove: () => void;
   onOpenSession: (sessionId: string) => void;
+  onExplain?: (datasetId: string, query: DriverQuery) => void;
 }) {
   const status = STATUS[monitor.last_status ?? "pending"] ?? STATUS.pending;
   const change = monitor.last_change_pct;
@@ -327,6 +334,8 @@ function MonitorCard({
         </p>
       )}
 
+      <WhyPanel monitor={monitor} onExplain={onExplain} />
+
       {monitor.question && monitor.source_session_id && (
         <button
           type="button"
@@ -336,6 +345,115 @@ function MonitorCard({
         >
           <MessageSquare className="size-3 shrink-0" />
           <span className="truncate">{monitor.question}</span>
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Why the number moved, computed the moment it breached.
+ *
+ * A monitor that says "revenue is below target" and stops has handed the reader the
+ * easy half. The drill-down that names the segment costs one more pass over the same
+ * cleaned table and no model tokens, so it rides along with the breach — and can be
+ * asked for on demand when the monitor is fine but the question is still interesting.
+ */
+function WhyPanel({
+  monitor,
+  onExplain,
+}: {
+  monitor: Monitor;
+  onExplain?: (datasetId: string, query: DriverQuery) => void;
+}) {
+  const [cause, setCause] = useState<RootCause | null>(monitor.root_cause ?? null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => setCause(monitor.root_cause ?? null), [monitor.root_cause]);
+
+  const diagnose = async () => {
+    setLoading(true);
+    try {
+      setCause(await api.diagnoseMonitor(monitor.id));
+    } catch {
+      setCause({ status: "unavailable", reason: "The drill-down could not be computed.", contributors: [], summary: null });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!cause) {
+    return (
+      <button
+        type="button"
+        onClick={() => void diagnose()}
+        disabled={loading}
+        className="mt-2.5 flex items-center gap-1.5 text-[12px] text-accent transition hover:underline disabled:opacity-50"
+      >
+        {loading ? <LoaderCircle className="size-3 animate-spin" /> : <Split className="size-3" />}
+        Explain what moved this number
+      </button>
+    );
+  }
+
+  if (cause.status !== "ok") {
+    return (
+      <p className="mt-2.5 text-[11.5px] leading-relaxed text-ink-3">
+        No drill-down available: {cause.reason}
+      </p>
+    );
+  }
+
+  const movers = cause.contributors.slice(0, 3);
+  return (
+    <div className="mt-3 rounded-lg border border-line bg-subtle p-3">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Split className="size-3.5 shrink-0 text-accent" />
+        <span className="text-[11px] font-medium tracking-wide text-ink-3 uppercase">
+          Why it moved
+        </span>
+        <span className="text-[11px] text-ink-3">
+          {cause.measure} by {cause.dimension} · matched on {cause.matched_on}
+        </span>
+        <span className="ml-auto text-[11px] text-ink-3">no model call</span>
+      </div>
+      <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink">{cause.summary}</p>
+      {movers.length > 0 && (
+        <ul className="mt-2 space-y-1">
+          {movers.map((mover) => (
+            <li key={mover.label} className="flex items-center gap-2 text-[12px]">
+              <span className="min-w-0 flex-1 truncate text-ink-2">{mover.label}</span>
+              <span
+                className={cn(
+                  "shrink-0 font-medium tabular-nums",
+                  mover.change > 0 ? "text-good" : "text-bad",
+                )}
+              >
+                {mover.change > 0 ? "+" : ""}
+                {formatValue(mover.change)}
+              </span>
+              {mover.contribution_pct !== null && (
+                <span className="w-16 shrink-0 text-right text-[11px] text-ink-3 tabular-nums">
+                  {(mover.contribution_pct * 100).toFixed(0)}% of it
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {cause.largest_term && (
+        <p className="mt-2 text-[11.5px] leading-relaxed text-ink-3">
+          Largest term: <span className="font-medium text-ink-2">{cause.largest_term.label}</span>{" "}
+          ({formatValue(cause.largest_term.value)}) — {cause.largest_term.detail}.
+        </p>
+      )}
+      {onExplain && cause.params && (
+        <button
+          type="button"
+          onClick={() => onExplain(monitor.dataset_id, cause.params as DriverQuery)}
+          className="mt-2 text-[12px] text-accent transition hover:underline"
+        >
+          Open the full drill-down →
         </button>
       )}
     </div>

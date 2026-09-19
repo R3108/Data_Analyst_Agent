@@ -33,7 +33,7 @@ class AddItemBody(BaseModel):
     title: str | None = Field(default=None, max_length=200)
     # The deterministic views have no message behind them: name the dataset and the
     # parameters instead, and the server recomputes the result before snapshotting it.
-    source: Literal["analysis", "drivers", "significance", "scenarios"] = "analysis"
+    source: Literal["analysis", "drivers", "significance", "scenarios", "cohorts", "forecast"] = "analysis"
     dataset_id: str | None = None
     params: dict[str, Any] | None = None
 

@@ -223,6 +223,17 @@ def dataset_context(name: str, profile: dict[str, Any], cleaning: dict[str, Any]
             parts.append(f"{col['unique']:,} unique")
         lines.append(" · ".join(parts))
 
+    withheld = profile.get("withheld_columns") or []
+    if withheld:
+        # The model is told the columns exist and why it cannot see inside them, so it
+        # groups and counts on them instead of guessing at literal values it never got.
+        lines += [
+            "",
+            "WITHHELD (personal data — values are not shown and must not be guessed at; "
+            "group, count and join on these columns, never filter on a literal value):",
+            *(f"- `{name}`" for name in withheld),
+        ]
+
     actions = [a for a in cleaning.get("actions", []) if a["step"] != "missing_values"]
     if actions:
         lines += ["", "CLEANING ALREADY APPLIED (df is the cleaned data):"]

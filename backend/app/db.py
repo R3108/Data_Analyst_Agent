@@ -32,7 +32,10 @@ CREATE TABLE IF NOT EXISTS datasets (
     version_diff_json TEXT,
     -- data contract (inherited across versions) and the last evaluation of it
     contract_json        TEXT,
-    contract_result_json TEXT
+    contract_result_json TEXT,
+    -- personal-data scan and the redaction policy, also inherited across versions
+    privacy_json         TEXT,
+    privacy_scan_json    TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -137,6 +140,8 @@ CREATE TABLE IF NOT EXISTS monitor_runs (
     breached       INTEGER NOT NULL DEFAULT 0,
     detail         TEXT,
     duration_ms    INTEGER,
+    -- deterministic drill-down attached to a breach: why the number moved
+    root_cause_json TEXT,
     created_at     TEXT NOT NULL
 );
 
@@ -235,6 +240,9 @@ MIGRATIONS: list[tuple[str, str, str]] = [
     ("datasets", "version_diff_json", "ALTER TABLE datasets ADD COLUMN version_diff_json TEXT"),
     ("datasets", "contract_json", "ALTER TABLE datasets ADD COLUMN contract_json TEXT"),
     ("datasets", "contract_result_json", "ALTER TABLE datasets ADD COLUMN contract_result_json TEXT"),
+    ("datasets", "privacy_json", "ALTER TABLE datasets ADD COLUMN privacy_json TEXT"),
+    ("datasets", "privacy_scan_json", "ALTER TABLE datasets ADD COLUMN privacy_scan_json TEXT"),
+    ("monitor_runs", "root_cause_json", "ALTER TABLE monitor_runs ADD COLUMN root_cause_json TEXT"),
 ]
 SHAREABLE_TABLES = {"session": "sessions", "board": "boards"}
 
@@ -288,18 +296,20 @@ class Database:
         payload = {
             "parent_dataset_id": None, "root_dataset_id": record["id"], "version": 1,
             "semantics_json": None, "version_diff_json": None, "contract_json": None,
-            "contract_result_json": None, **record,
+            "contract_result_json": None, "privacy_json": None, "privacy_scan_json": None,
+            **record,
         }
         with self.connect() as conn:
             conn.execute(
                 """INSERT INTO datasets (id, name, original_filename, file_type, sheet_name,
                        n_rows, n_cols, size_bytes, profile_json, cleaning_json, created_at,
                        parent_dataset_id, root_dataset_id, version, semantics_json, version_diff_json,
-                       contract_json, contract_result_json)
+                       contract_json, contract_result_json, privacy_json, privacy_scan_json)
                    VALUES (:id, :name, :original_filename, :file_type, :sheet_name,
                        :n_rows, :n_cols, :size_bytes, :profile_json, :cleaning_json, :created_at,
                        :parent_dataset_id, :root_dataset_id, :version, :semantics_json,
-                       :version_diff_json, :contract_json, :contract_result_json)""",
+                       :version_diff_json, :contract_json, :contract_result_json,
+                       :privacy_json, :privacy_scan_json)""",
                 payload,
             )
 
@@ -347,6 +357,22 @@ class Database:
                  json.dumps(result) if result else None, dataset_id),
             )
 
+    def update_dataset_privacy(self, dataset_id: str, state: dict[str, Any] | None,
+                               scan_result: dict[str, Any] | None = None) -> None:
+        """Store the redaction policy and, when re-scanned, the findings behind it."""
+        with self.connect() as conn:
+            conn.execute("UPDATE datasets SET privacy_json = ? WHERE id = ?",
+                         (json.dumps(state) if state else None, dataset_id))
+            if scan_result is not None:
+                conn.execute("UPDATE datasets SET privacy_scan_json = ? WHERE id = ?",
+                             (json.dumps(scan_result), dataset_id))
+
+    def update_dataset_shape(self, dataset_id: str, *, n_rows: int, n_cols: int) -> None:
+        """After a redaction drops a column the stored shape is stale, and it is shown."""
+        with self.connect() as conn:
+            conn.execute("UPDATE datasets SET n_rows = ?, n_cols = ? WHERE id = ?",
+                         (int(n_rows), int(n_cols), dataset_id))
+
     def dataset_versions(self, root_dataset_id: str) -> list[dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute(
@@ -389,6 +415,10 @@ class Database:
         record["contract"] = json.loads(contract) if contract else None
         contract_result = record.pop("contract_result_json", None)
         record["contract_result"] = json.loads(contract_result) if contract_result else None
+        privacy = record.pop("privacy_json", None)
+        record["privacy"] = json.loads(privacy) if privacy else None
+        privacy_scan = record.pop("privacy_scan_json", None)
+        record["privacy_scan"] = json.loads(privacy_scan) if privacy_scan else None
         record.setdefault("version", 1)
         record["root_dataset_id"] = record.get("root_dataset_id") or record["id"]
         return record
@@ -749,14 +779,16 @@ class Database:
     def add_monitor_run(self, monitor_id: str, record: dict[str, Any], history_limit: int = 60) -> dict[str, Any]:
         payload = {"id": new_id("run"), "monitor_id": monitor_id, "dataset_id": None, "value": None,
                    "previous_value": None, "change_pct": None, "breached": 0, "detail": None,
-                   "duration_ms": None, "created_at": utcnow(), **record}
+                   "duration_ms": None, "root_cause": None, "created_at": utcnow(), **record}
         payload["breached"] = int(bool(payload["breached"]))
+        root_cause = payload.pop("root_cause", None)
+        payload["root_cause_json"] = json.dumps(root_cause) if root_cause else None
         with self.connect() as conn:
             conn.execute(
                 """INSERT INTO monitor_runs (id, monitor_id, dataset_id, value, previous_value,
-                       change_pct, status, breached, detail, duration_ms, created_at)
+                       change_pct, status, breached, detail, duration_ms, root_cause_json, created_at)
                    VALUES (:id, :monitor_id, :dataset_id, :value, :previous_value, :change_pct,
-                       :status, :breached, :detail, :duration_ms, :created_at)""",
+                       :status, :breached, :detail, :duration_ms, :root_cause_json, :created_at)""",
                 payload,
             )
             # Keep history bounded so a frequent schedule cannot grow the database without limit.
@@ -767,18 +799,26 @@ class Database:
                 (monitor_id, monitor_id, history_limit),
             )
         payload["breached"] = bool(payload["breached"])
+        payload.pop("root_cause_json", None)
+        payload["root_cause"] = root_cause
         return payload
 
     def list_monitor_runs(self, monitor_id: str, limit: int = 30) -> list[dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute(
+                # Same tie-break as the delivery log: the history is reversed into a
+                # timeline, and "most recent run" has to mean the same thing every time.
                 """SELECT * FROM monitor_runs WHERE monitor_id = ?
-                    ORDER BY created_at DESC LIMIT ?""",
+                    ORDER BY created_at DESC, rowid DESC LIMIT ?""",
                 (monitor_id, limit),
             ).fetchall()
-        runs = [dict(r) for r in rows]
-        for run in runs:
+        runs = []
+        for row in rows:
+            run = dict(row)
             run["breached"] = bool(run["breached"])
+            raw = run.pop("root_cause_json", None)
+            run["root_cause"] = json.loads(raw) if raw else None
+            runs.append(run)
         return list(reversed(runs))
 
     @staticmethod
@@ -847,10 +887,12 @@ class Database:
 
     def list_deliveries(self, limit: int = 30) -> list[dict[str, Any]]:
         with self.connect() as conn:
+            # rowid breaks the tie: two alerts delivered in the same microsecond would
+            # otherwise come back in an arbitrary order, and this log is read as a timeline.
             rows = conn.execute(
                 """SELECT d.*, c.name AS channel_name, c.kind AS channel_kind
                      FROM alert_deliveries d LEFT JOIN alert_channels c ON c.id = d.channel_id
-                    ORDER BY d.created_at DESC LIMIT ?""",
+                    ORDER BY d.created_at DESC, d.rowid DESC LIMIT ?""",
                 (limit,),
             ).fetchall()
         return [dict(r) for r in rows]

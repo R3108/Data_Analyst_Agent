@@ -10,7 +10,9 @@ import pandas as pd
 
 from app.core.errors import InvalidInputError, NotFoundError
 from app.db import Database
+from app.services import cohorts as cohorts_service
 from app.services import drivers as drivers_service
+from app.services import forecasting as forecasting_service
 from app.services import scenarios as scenarios_service
 from app.services import statistics as statistics_service
 
@@ -31,6 +33,8 @@ COMPUTED_SOURCES: dict[str, tuple[Computation, str]] = {
     "drivers": (drivers_service.explain, "Drivers"),
     "significance": (statistics_service.compare, "Significance"),
     "scenarios": (scenarios_service.simulate, "Scenario"),
+    "cohorts": (cohorts_service.analyze, "Retention"),
+    "forecast": (forecasting_service.project, "Forecast"),
 }
 
 

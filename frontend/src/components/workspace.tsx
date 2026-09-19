@@ -23,22 +23,27 @@ import {
   Printer,
   Search,
   Share2,
+  ShieldAlert,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
   Split,
   Sun,
+  TrendingUp,
   TriangleAlert,
+  Users,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { BoardView } from "@/components/boards/board-view";
 import { BriefingsView } from "@/components/briefings-view";
 import { ChatView, type PendingTurn } from "@/components/chat/chat-view";
+import { CohortsView } from "@/components/cohorts-view";
 import { CommandPalette, type PaletteCommand } from "@/components/command-palette";
 import { DataPanel, type DataTab } from "@/components/data-panel";
 import { DriversView } from "@/components/drivers-view";
 import { ExportMenu, type ExportOption } from "@/components/export-menu";
+import { ForecastView } from "@/components/forecast-view";
 import { MonitorsView } from "@/components/monitors-view";
 import { PinProvider, type PinTarget } from "@/components/pin";
 import { ScenarioView } from "@/components/scenario-view";
@@ -72,15 +77,31 @@ import type {
 } from "@/lib/types";
 
 /** The full-width views that replace the chat surface. */
-export type WorkspaceView = "monitors" | "drivers" | "significance" | "scenarios" | "sources" | "briefings";
+export type WorkspaceView =
+  | "monitors"
+  | "drivers"
+  | "significance"
+  | "scenarios"
+  | "cohorts"
+  | "forecast"
+  | "sources"
+  | "briefings";
 
-const DATASET_VIEWS: WorkspaceView[] = ["drivers", "significance", "scenarios"];
+const DATASET_VIEWS: WorkspaceView[] = [
+  "drivers",
+  "significance",
+  "scenarios",
+  "cohorts",
+  "forecast",
+];
 
 const VIEW_TITLES: Record<WorkspaceView, string> = {
   monitors: "Monitors",
   drivers: "Drivers",
   significance: "Significance",
   scenarios: "Scenarios",
+  cohorts: "Retention",
+  forecast: "Forecast",
   sources: "Sources",
   briefings: "Briefings",
 };
@@ -588,8 +609,16 @@ export function Workspace() {
         run: () => openView("significance", activeDatasetId()) },
       { id: "scenarios", group: "Actions", label: "Model a what-if scenario",
         icon: <SlidersHorizontal className="size-4" />,
-        keywords: "scenario what if goal seek target lever forecast plan simulate",
+        keywords: "scenario what if goal seek target lever plan simulate",
         run: () => openView("scenarios", activeDatasetId()) },
+      { id: "cohorts", group: "Actions", label: "See whether customers come back",
+        icon: <Users className="size-4" />,
+        keywords: "cohort retention churn repeat loyalty survival ltv lifetime value",
+        run: () => openView("cohorts", activeDatasetId()) },
+      { id: "forecast", group: "Actions", label: "Forecast a measure with a backtest",
+        icon: <TrendingUp className="size-4" />,
+        keywords: "forecast projection predict trend seasonal backtest mase accuracy horizon",
+        run: () => openView("forecast", activeDatasetId()) },
       { id: "sources", group: "Actions", label: "Connect a SQL database",
         icon: <Database className="size-4" />,
         keywords: "source postgres mysql duckdb sql warehouse query refresh sync",
@@ -657,6 +686,13 @@ export function Workspace() {
           keywords: "expectations quality gate schema freshness validation",
           run: () => {
             setDataTab("contract");
+            setDataOpen(true);
+          } },
+        { id: "privacy", group: "Actions", label: "Review personal data in this dataset",
+          icon: <ShieldAlert className="size-4" />,
+          keywords: "privacy pii gdpr redact mask hash anonymise personal data email phone",
+          run: () => {
+            setDataTab("privacy");
             setDataOpen(true);
           } },
         { id: "version", group: "Actions", label: "Upload a new version of this dataset",
@@ -792,6 +828,24 @@ export function Workspace() {
               <code className="font-mono">AI_MONTHLY_BUDGET_USD</code> and restart the backend.
             </Banner>
           )}
+          {dataset && (dataset.privacy_scan?.counts.high ?? 0) > 0 && !dataset.privacy?.applied_at && (
+            <Banner tone="warn" icon={<ShieldAlert className="size-4" />}>
+              {dataset.privacy_scan?.counts.high === 1
+                ? `1 column in ${dataset.name} holds`
+                : `${dataset.privacy_scan?.counts.high} columns in ${dataset.name} hold`}{" "}
+              personal data. Example values are already withheld from every prompt —{" "}
+              <button
+                onClick={() => {
+                  setDataTab("privacy");
+                  setDataOpen(true);
+                }}
+                className="font-medium underline underline-offset-2"
+              >
+                decide whether to redact the table
+              </button>
+              .
+            </Banner>
+          )}
           {usage?.budget.enabled && !usage.budget.exhausted && (usage.budget.used_pct ?? 0) >= 80 && (
             <Banner tone="warn" icon={<TriangleAlert className="size-4" />}>
               AI budget is {Math.round(usage.budget.used_pct ?? 0)}% used with $
@@ -805,6 +859,7 @@ export function Workspace() {
                 <MonitorsView
                   onOpenSession={(id) => void openSession(id)}
                   onChanged={setDigest}
+                  onExplain={(id, drillDown) => openView("drivers", id, drillDown)}
                   emailConfigured={health?.alerts?.email_configured}
                 />
               ) : view?.kind === "sources" ? (
@@ -885,6 +940,18 @@ export function Workspace() {
                   setDataset(updated);
                 }}
                 onUploadVersion={(file) => void uploadVersion(file)}
+                onDatasetChanged={() => {
+                  // Redaction rewrites the table, so the open copy is stale by definition.
+                  datasetCache.current.delete(dataset.id);
+                  void api
+                    .getDataset(dataset.id)
+                    .then((fresh) => {
+                      datasetCache.current.set(fresh.id, fresh);
+                      setDataset(fresh);
+                    })
+                    .catch(() => undefined);
+                  void refreshLists();
+                }}
               />
             )}
           </div>
@@ -934,6 +1001,8 @@ function DatasetView({
   const shared = { datasets, datasetId, onDatasetChange, onAsk };
   if (kind === "significance") return <SignificanceView {...shared} />;
   if (kind === "scenarios") return <ScenarioView {...shared} />;
+  if (kind === "cohorts") return <CohortsView {...shared} />;
+  if (kind === "forecast") return <ForecastView {...shared} />;
   return <DriversView {...shared} initialQuery={query} />;
 }
 
