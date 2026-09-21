@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from tests.conftest import sign_in
 from app.services.notifications import Alert
 
 
@@ -31,7 +32,7 @@ def transport() -> RecordingTransport:
 @pytest.fixture
 def client(settings, transport):
     with TestClient(create_app(settings, llm=object(), transport=transport)) as test_client:
-        yield test_client
+        yield sign_in(test_client)
 
 
 def csv_bytes(*, rows: int = 400, regions: tuple[str, ...] = ("North", "South"),

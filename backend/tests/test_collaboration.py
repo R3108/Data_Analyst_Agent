@@ -1,15 +1,14 @@
-"""Comments, the activity log and optional workspace access control."""
+"""Comments, the activity log, and the identity the API attributes them to."""
 
 from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.core.auth import ANONYMOUS, parse_tokens
-from app.core.config import Settings
 from app.core.errors import InvalidInputError, NotFoundError
 from app.db import Database
 from app.main import create_app
+from tests.conftest import sign_in
 from app.services.activity import ActivityService
 from app.services.comments import CommentService
 
@@ -143,63 +142,24 @@ def test_recording_activity_never_raises(monkeypatch, activity):
     assert activity.record("dataset.upload", actor="Ada") is None
 
 
-# --------------------------------------------------------------------------- access control
+# --------------------------------------------------------------------------- attribution
 
 
-def test_parse_tokens_reads_names_and_ignores_blanks():
-    assert parse_tokens("abc:Ada, def:Grace Hopper") == {"abc": "Ada", "def": "Grace Hopper"}
-    assert parse_tokens("abc") == {"abc": "Teammate"}
-    assert parse_tokens("") == {}
-    assert parse_tokens("  ,  ") == {}
-
-
-def test_an_open_workspace_needs_no_token(settings, tiny_csv_bytes):
+def test_the_workspace_reports_itself_as_protected_and_isolated(settings):
     with TestClient(create_app(settings)) as client:
-        assert client.get("/api/health").json()["workspace"]["protected"] is False
-        assert client.get("/api/me").json()["name"] == ANONYMOUS
+        sign_in(client, email="ada@example.com", name="Ada Lovelace")
+        workspace = client.get("/api/health").json()["workspace"]
+        assert workspace == {"protected": True, "isolation": "per-user database"}
+        assert client.get("/api/me").json()["name"] == "Ada Lovelace"
         assert client.get("/api/datasets").status_code == 200
 
 
-@pytest.fixture
-def protected(tmp_path):
-    return Settings(
-        _env_file=None, environment="test", data_dir=tmp_path / "protected",
-        openai_api_key="test-key", workspace_tokens="tok-ada:Ada, tok-grace:Grace",
-    )
-
-
-def test_a_protected_workspace_rejects_a_call_with_no_token(protected):
-    with TestClient(create_app(protected)) as client:
-        response = client.get("/api/datasets")
-        assert response.status_code == 401
-        assert response.json()["error"]["code"] == "unauthorized"
-
-
-def test_a_protected_workspace_rejects_a_wrong_token(protected):
-    with TestClient(create_app(protected)) as client:
-        response = client.get("/api/datasets", headers={"Authorization": "Bearer nope"})
-        assert response.status_code == 401
-
-
-def test_a_valid_token_names_the_caller(protected):
-    with TestClient(create_app(protected)) as client:
-        response = client.get("/api/me", headers={"Authorization": "Bearer tok-grace"})
-        assert response.json() == {"name": "Grace", "protected": True}
-
-
-def test_health_and_share_links_stay_reachable_without_a_token(protected):
-    with TestClient(create_app(protected)) as client:
-        assert client.get("/api/health").status_code == 200
-        # A share link carries its own unguessable token; an unknown one is 404, not 401.
-        assert client.get("/api/share/unknown-token").status_code == 404
-
-
-def test_a_comment_is_attributed_to_the_token_holder(protected):
-    with TestClient(create_app(protected)) as client:
-        headers = {"Authorization": "Bearer tok-ada"}
-        created = client.post("/api/comments", headers=headers, json={
+def test_a_comment_is_attributed_to_the_signed_in_account(settings):
+    with TestClient(create_app(settings)) as client:
+        sign_in(client, email="ada@example.com", name="Ada Lovelace")
+        created = client.post("/api/comments", json={
             "subject_kind": "board", "subject_id": "brd_1", "body": "Looks right to me.",
             "author": "Someone Else",
         }).json()
-        # The token decides the name; a client-supplied one cannot override it.
-        assert created["author"] == "Ada"
+        # The session decides the name; a client-supplied one cannot override it.
+        assert created["author"] == "Ada Lovelace"

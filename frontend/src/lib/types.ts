@@ -13,13 +13,128 @@ export interface Health {
   investigations?: { max_steps: number };
   recall?: { enabled: boolean; limit: number };
   sources?: { dialects: string[]; sync_interval_minutes: number };
-  workspace?: { protected: boolean };
+  workspace?: { protected: boolean; isolation?: string };
   limits: { max_upload_mb: number; max_rows: number; ai_monthly_budget_usd: number };
+  /** False on the anonymous half of the response, which carries liveness only. */
+  authenticated?: boolean;
 }
 
-export interface Identity {
+export type Role = "admin" | "user";
+export type AccountStatus = "active" | "suspended";
+
+/** The signed-in account. Never carries anything secret. */
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  role: Role;
+  status?: AccountStatus;
+  must_change_password?: boolean;
+  last_login_at?: string | null;
+  password_changed_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  /** False for an account created through Google that has not set a password yet. */
+  has_password?: boolean;
+}
+
+/** `/api/auth/methods` — the ways this account can sign in. */
+export interface SignInMethods {
+  password: boolean;
+  google: { email: string | null; connected_at: string; last_used_at: string | null } | null;
+  google_available: boolean;
+}
+
+/** `/api/me` — the account, plus the display name the comment UI already reads. */
+export interface Identity extends User {
   name: string;
   protected: boolean;
+}
+
+/** What the sign-in screens need before anyone is signed in. */
+export interface AuthConfig {
+  registration_enabled: boolean;
+  allowed_domains: string[];
+  first_run: boolean;
+  password_reset_enabled: boolean;
+  email_delivery: boolean;
+  min_password_length: number;
+  google_enabled?: boolean;
+}
+
+export interface PasswordStrength {
+  score: number;
+  label: string;
+  suggestions: string[];
+}
+
+export interface AuthSession {
+  id: string;
+  created_at: string;
+  last_seen_at: string;
+  expires_at: string;
+  ip: string | null;
+  user_agent: string | null;
+  current: boolean;
+}
+
+export interface AccountUsage {
+  datasets: number;
+  sessions: number;
+  messages: number;
+  boards: number;
+  monitors: number;
+  sources: number;
+  rows: number;
+  storage_bytes: number;
+}
+
+export interface AdminUser extends User {
+  usage: AccountUsage;
+  active_sessions: number;
+}
+
+export interface AdminUserDetail extends User {
+  usage: AccountUsage;
+  sessions: AuthSession[];
+  recent_events: AuditEvent[];
+}
+
+export interface AuditEvent {
+  id: string;
+  created_at: string;
+  event: string;
+  outcome: string;
+  user_id: string | null;
+  email: string | null;
+  actor_id: string | null;
+  ip: string | null;
+  user_agent: string | null;
+  detail: string | null;
+  user_email?: string | null;
+  user_name?: string | null;
+}
+
+export interface AdminOverview {
+  version: string;
+  users: { total: number; admins: number; suspended: number; new_this_week: number };
+  sessions: { active: number; signed_in_users: number };
+  activity_7d: { sign_ins: number; registrations: number; password_resets: number };
+  storage: { total_bytes: number; datasets: number };
+  security: {
+    password_algorithm: string;
+    argon2_available: boolean;
+    secure_cookies: boolean;
+    same_site: string;
+    auth_secret_configured: boolean;
+    environment: string;
+    registration_enabled: boolean;
+    allowed_domains: string[];
+    session_idle_days: number;
+    session_absolute_days: number;
+    email_delivery: boolean;
+    trust_forwarded_for: boolean;
+  };
 }
 
 export interface MetricDefinition {

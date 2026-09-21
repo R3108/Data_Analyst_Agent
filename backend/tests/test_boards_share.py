@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from app.db import Database
 from app.main import create_app
-from tests.conftest import REPORT, ScriptedLLM, make_plan
+from tests.conftest import REPORT, ScriptedLLM, make_plan, set_setting, sign_in
 
 CODE = """
 by_region = df.groupby("Region", as_index=False)["Revenue"].sum()
@@ -22,7 +22,7 @@ table(by_region, title="Revenue by region")
 def client(settings):
     llm = ScriptedLLM({"plan": [make_plan()], "code": [{"approach": "group", "code": CODE}], "report": [REPORT]})
     with TestClient(create_app(settings, llm=llm)) as test_client:
-        yield test_client
+        yield sign_in(test_client)
 
 
 @pytest.fixture
@@ -50,7 +50,7 @@ def test_assistant_messages_record_usage_and_cost(client, analysed):
 
 def test_monthly_budget_blocks_new_model_calls(client, analysed):
     session, _ = analysed
-    client.app.state.settings.ai_monthly_budget_usd = 0.001
+    set_setting(client, ai_monthly_budget_usd=0.001)
 
     response = client.post(f"/api/sessions/{session['id']}/chat", json={"message": "Analyse this again"})
 

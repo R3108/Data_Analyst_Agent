@@ -4,16 +4,21 @@ import {
   Activity,
   Bell,
   CalendarClock,
+  ChevronDown,
+  ChevronUp,
   Database,
   FileSpreadsheet,
   FlaskConical,
   Gauge,
   LayoutDashboard,
+  LogOut,
   MessageSquare,
   Monitor,
   Moon,
   Plus,
   Search,
+  Settings,
+  ShieldCheck,
   SlidersHorizontal,
   Split,
   Sun,
@@ -22,7 +27,8 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import Link from "next/link";
+import { useEffect, useState } from "react";
 
 import { ActivityFeed } from "@/components/activity-feed";
 import { Wordmark } from "@/components/brand";
@@ -34,10 +40,10 @@ import type {
   BoardSummary,
   DatasetSummary,
   Health,
-  Identity,
   MonitorDigest,
   SessionSummary,
   UsageReport,
+  User,
 } from "@/lib/types";
 import type { WorkspaceView } from "@/components/workspace";
 
@@ -110,7 +116,9 @@ export function Sidebar({
   activeSessionId,
   activeBoardId,
   activeView,
-  identity,
+  user,
+  isAdmin,
+  onSignOut,
   monitorDigest,
   onSelectSession,
   onSelectBoard,
@@ -134,7 +142,9 @@ export function Sidebar({
   activeSessionId: string | null;
   activeBoardId: string | null;
   activeView: WorkspaceView | null;
-  identity: Identity | null;
+  user: User | null;
+  isAdmin: boolean;
+  onSignOut: () => void;
   monitorDigest: MonitorDigest | null;
   onSelectSession: (id: string) => void;
   onSelectBoard: (id: string) => void;
@@ -149,6 +159,15 @@ export function Sidebar({
 }) {
   const breaches = monitorDigest?.counts.breached ?? 0;
   const [showActivity, setShowActivity] = useState(false);
+
+  // On small screens the sidebar is a drawer; Escape dismisses it like the backdrop does.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => event.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
   return (
     <>
       {open && <div className="fixed inset-0 z-30 bg-black/30 lg:hidden" onClick={onClose} aria-hidden="true" />}
@@ -165,7 +184,7 @@ export function Sidebar({
           </IconButton>
         </div>
 
-        <div className="space-y-1.5 px-3 pt-1 pb-2">
+        <div className="shrink-0 space-y-1 px-3 pt-1 pb-3">
           <Button className="w-full justify-start" onClick={onNewAnalysis}>
             <Plus className="size-4" />
             New analysis
@@ -178,47 +197,43 @@ export function Sidebar({
             <span className="flex-1 text-left">Search</span>
             <kbd className="rounded border border-line px-1.5 text-[10px]">Ctrl K</kbd>
           </button>
-          {VIEWS.map((entry) => (
-            <button
-              key={entry.kind}
-              onClick={() => onOpenView(entry.kind)}
-              disabled={entry.needsDataset && datasets.length === 0}
-              title={entry.hint}
-              className={cn(
-                "flex h-8 w-full items-center gap-2 rounded-lg px-2.5 text-[13px] transition disabled:opacity-40",
-                activeView === entry.kind
-                  ? "bg-muted font-medium text-ink"
-                  : "text-ink-3 hover:bg-muted hover:text-ink",
-              )}
-            >
-              {entry.icon}
-              <span className="flex-1 text-left">{entry.label}</span>
-            </button>
-          ))}
-          <button
-            onClick={() => onOpenView("monitors")}
-            title="Watch a KPI and get told when it moves — costs no model tokens"
-            className={cn(
-              "flex h-8 w-full items-center gap-2 rounded-lg px-2.5 text-[13px] transition",
-              activeView === "monitors" ? "bg-muted font-medium text-ink" : "text-ink-3 hover:bg-muted hover:text-ink",
-            )}
-          >
-            <Bell className={cn("size-3.5", breaches > 0 && "text-bad")} />
-            <span className="flex-1 text-left">Monitors</span>
-            {breaches > 0 ? (
-              <span className="rounded-full bg-bad-soft px-1.5 text-[10.5px] font-semibold text-bad tabular-nums">
-                {breaches}
-              </span>
-            ) : (
-              monitorDigest !== null &&
-              monitorDigest.total > 0 && (
-                <span className="text-[10.5px] text-ink-3 tabular-nums">{monitorDigest.total}</span>
-              )
-            )}
-          </button>
         </div>
 
-        <nav className="min-h-0 flex-1 space-y-6 overflow-y-auto px-3 py-3" aria-label="History">
+        {/* Tools and history share one scroll region, so neither can squeeze the other to nothing. */}
+        <nav className="min-h-0 flex-1 space-y-5 overflow-y-auto border-t border-line px-3 py-3" aria-label="Workspace">
+          <Section title="Tools">
+            {VIEWS.map((entry) => (
+              <NavButton
+                key={entry.kind}
+                active={activeView === entry.kind}
+                icon={entry.icon}
+                label={entry.label}
+                hint={entry.needsDataset && datasets.length === 0 ? "Upload a dataset first" : entry.hint}
+                disabled={entry.needsDataset && datasets.length === 0}
+                onClick={() => onOpenView(entry.kind)}
+              />
+            ))}
+            <NavButton
+              active={activeView === "monitors"}
+              icon={<Bell className={cn("size-3.5", breaches > 0 && "text-bad")} />}
+              label="Monitors"
+              hint="Watch a KPI and get told when it moves — costs no model tokens"
+              onClick={() => onOpenView("monitors")}
+              badge={
+                breaches > 0 ? (
+                  <span className="rounded-full bg-bad-soft px-1.5 text-[10.5px] font-semibold text-bad tabular-nums">
+                    {breaches}
+                  </span>
+                ) : (
+                  monitorDigest !== null &&
+                  monitorDigest.total > 0 && (
+                    <span className="text-[10.5px] text-ink-3 tabular-nums">{monitorDigest.total}</span>
+                  )
+                )
+              }
+            />
+          </Section>
+
           <Section title="Analyses">
             {sessions.length === 0 ? (
               <p className="px-2 text-[13px] text-ink-3">Your analyses will appear here.</p>
@@ -282,33 +297,135 @@ export function Sidebar({
               ))
             )}
           </Section>
+
+          <div>
+            <button
+              onClick={() => setShowActivity((value) => !value)}
+              aria-expanded={showActivity}
+              className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-[12px] text-ink-3 transition hover:bg-muted hover:text-ink"
+            >
+              <Activity className="size-3.5" />
+              <span className="flex-1 text-left">Workspace activity</span>
+              <ChevronDown className={cn("size-3.5 transition", showActivity && "rotate-180")} />
+            </button>
+            {showActivity && (
+              <div className="mt-1 rounded-lg border border-line bg-canvas/60 p-2">
+                <ActivityFeed limit={30} />
+              </div>
+            )}
+          </div>
         </nav>
 
-        <div className="space-y-3 border-t border-line p-3">
-          <button
-            onClick={() => setShowActivity((value) => !value)}
-            aria-expanded={showActivity}
-            className="flex h-7 w-full items-center gap-2 rounded-lg px-1 text-[12px] text-ink-3 transition hover:bg-muted hover:text-ink"
-          >
-            <Activity className="size-3.5" />
-            <span className="flex-1 text-left">{showActivity ? "Hide" : "Show"} workspace activity</span>
-            {identity?.protected && (
-              <span className="truncate text-[11px] text-ink-3" title="Signed in to this workspace">
-                {identity.name}
-              </span>
-            )}
-          </button>
-          {showActivity && (
-            <div className="max-h-60 overflow-y-auto rounded-lg border border-line bg-canvas/60 p-2">
-              <ActivityFeed limit={30} />
-            </div>
-          )}
-          <Status health={health} healthError={healthError} />
+        <div className="shrink-0 space-y-2.5 border-t border-line p-3">
           {usage && <UsageMeter usage={usage} />}
-          <ThemeSwitch />
+          <div className="flex items-center gap-2">
+            <Status health={health} healthError={healthError} />
+            <ThemeSwitch />
+          </div>
+          <AccountMenu user={user} isAdmin={isAdmin} onSignOut={onSignOut} />
         </div>
       </aside>
     </>
+  );
+}
+
+/**
+ * The account strip at the foot of the sidebar.
+ *
+ * The "Administration" entry is hidden from members, but hiding is presentation, not
+ * permission: typing `/admin` renders a refusal, and every call that page would make
+ * is answered 403 by the server. The menu is a shortcut, never a gate.
+ */
+function AccountMenu({
+  user,
+  isAdmin,
+  onSignOut,
+}: {
+  user: User | null;
+  isAdmin: boolean;
+  onSignOut: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    // Any click elsewhere, or Escape, dismisses it.
+    const onKey = (event: KeyboardEvent) => event.key === "Escape" && close();
+    window.addEventListener("click", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  if (!user) return null;
+
+  return (
+    <div className="relative" onClick={(event) => event.stopPropagation()}>
+      {open && (
+        <div
+          role="menu"
+          className="absolute bottom-full left-0 mb-1.5 w-full overflow-hidden rounded-lg border border-line bg-panel py-1 shadow-pop"
+        >
+          <MenuLink href="/account" icon={<Settings className="size-3.5" />}>
+            Account &amp; devices
+          </MenuLink>
+          {isAdmin && (
+            <MenuLink href="/admin" icon={<ShieldCheck className="size-3.5" />}>
+              Administration
+            </MenuLink>
+          )}
+          <button
+            role="menuitem"
+            onClick={onSignOut}
+            className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[13px] text-ink-2 transition hover:bg-muted hover:text-ink"
+          >
+            <LogOut className="size-3.5" />
+            Sign out
+          </button>
+        </div>
+      )}
+      <button
+        onClick={() => setOpen((value) => !value)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left transition hover:bg-muted"
+      >
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-accent-soft text-[11.5px] font-semibold text-accent-ink">
+          {user.name.slice(0, 1).toUpperCase()}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[12.5px] font-medium text-ink">{user.name}</span>
+          <span className="block truncate text-[11px] text-ink-3">
+            {isAdmin ? "Administrator" : user.email}
+          </span>
+        </span>
+        <ChevronUp className={cn("size-3.5 shrink-0 text-ink-3 transition", open && "rotate-180")} />
+      </button>
+    </div>
+  );
+}
+
+function MenuLink({
+  href,
+  icon,
+  children,
+}: {
+  href: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <Link
+      href={href}
+      role="menuitem"
+      className="flex items-center gap-2 px-2.5 py-1.5 text-[13px] text-ink-2 transition hover:bg-muted hover:text-ink"
+    >
+      {icon}
+      {children}
+    </Link>
   );
 }
 
@@ -362,6 +479,41 @@ function Section({ title, action, children }: { title: string; action?: React.Re
   );
 }
 
+function NavButton({
+  active,
+  icon,
+  label,
+  hint,
+  disabled,
+  badge,
+  onClick,
+}: {
+  active: boolean;
+  icon: React.ReactNode;
+  label: string;
+  hint: string;
+  disabled?: boolean;
+  badge?: React.ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={hint}
+      aria-current={active ? "page" : undefined}
+      className={cn(
+        "flex h-8 w-full items-center gap-2.5 rounded-lg px-2 text-[13px] transition disabled:cursor-not-allowed disabled:opacity-40",
+        active ? "bg-muted font-medium text-ink" : "text-ink-2 enabled:hover:bg-muted/60 enabled:hover:text-ink",
+      )}
+    >
+      <span className={cn("shrink-0", active ? "text-accent" : "text-ink-3")}>{icon}</span>
+      <span className="flex-1 truncate text-left">{label}</span>
+      {badge}
+    </button>
+  );
+}
+
 function Item({
   active,
   icon,
@@ -394,7 +546,7 @@ function Item({
         onClick={onDelete}
         aria-label={deleteLabel}
         title={deleteLabel}
-        className="absolute top-1/2 right-1.5 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-ink-3 opacity-0 transition group-hover:opacity-100 hover:bg-bad-soft hover:text-bad focus-visible:opacity-100"
+        className="absolute top-1/2 right-1.5 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-ink-3 opacity-0 transition group-focus-within:opacity-100 group-hover:opacity-100 hover:bg-bad-soft hover:text-bad focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
       >
         <Trash className="size-3.5" />
       </button>
@@ -413,10 +565,13 @@ function Status({ health, healthError }: { health: Health | null; healthError: s
     label = health.llm_credentials_detected ? modelLabel(health.model) : "API key missing";
   }
   return (
-    <div className="flex items-center gap-2 px-1 text-[12px] text-ink-2">
-      <span className={cn("size-2 rounded-full", dot)} />
+    <div
+      className="flex min-w-0 flex-1 items-center gap-2 px-1 text-[12px] text-ink-2"
+      title={health ? `${label} · v${health.version}` : label}
+    >
+      <span className={cn("size-2 shrink-0 rounded-full", dot)} />
       <span className="truncate">{label}</span>
-      {health && <span className="ml-auto text-ink-3">v{health.version}</span>}
+      {health && <span className="shrink-0 text-ink-3">v{health.version}</span>}
     </div>
   );
 }
@@ -429,7 +584,7 @@ function ThemeSwitch() {
     { id: "dark", icon: <Moon className="size-3.5" />, label: "Dark theme" },
   ];
   return (
-    <div className="grid grid-cols-3 gap-1 rounded-lg bg-muted p-1" role="radiogroup" aria-label="Theme">
+    <div className="flex shrink-0 gap-0.5 rounded-lg bg-muted p-0.5" role="radiogroup" aria-label="Theme">
       {options.map((option) => (
         <button
           key={option.id}
@@ -439,7 +594,7 @@ function ThemeSwitch() {
           title={option.label}
           onClick={() => setMode(option.id)}
           className={cn(
-            "flex h-7 items-center justify-center rounded-md transition",
+            "flex size-6 items-center justify-center rounded-md transition",
             mode === option.id ? "bg-panel text-ink shadow-card" : "text-ink-3 hover:text-ink",
           )}
         >

@@ -6,6 +6,10 @@ pydantic>=2.8
 pydantic-settings>=2.4
 python-multipart>=0.0.9
 httpx>=0.27
+# Password hashing. Argon2id is the winner of the Password Hashing Competition and the
+# OWASP first choice; without it the app falls back to PBKDF2-SHA256 from the standard
+# library, which still stores nothing reversible but resists GPU cracking less well.
+argon2-cffi>=23.1
 pandas>=2.2
 numpy>=1.26
 openpyxl>=3.1

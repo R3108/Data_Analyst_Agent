@@ -1,10 +1,17 @@
 import type {
+  AccountStatus,
   ActivityEntry,
+  AdminOverview,
+  AdminUser,
+  AdminUserDetail,
   AlertChannel,
   AlertDelivery,
   AlertEvent,
   AlertKind,
   AlertSettings,
+  AuditEvent,
+  AuthConfig,
+  AuthSession,
   BoardDetail,
   BoardItem,
   BoardSummary,
@@ -36,12 +43,14 @@ import type {
   MonitorDigest,
   MonitorDirection,
   MonitorRun,
+  PasswordStrength,
   PinKind,
   Preview,
   PrivacyAction,
   PrivacyReport,
   RecallMatch,
   RecallSummary,
+  Role,
   RootCause,
   RouteResult,
   ScenarioQuery,
@@ -50,53 +59,69 @@ import type {
   SessionDetail,
   SessionSummary,
   SharedDocument,
+  SignInMethods,
   SignificanceOptions,
   SignificanceQuery,
   SignificanceResult,
   Source,
   SourceTest,
   UsageReport,
+  User,
 } from "./types";
 
-export const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
+/**
+ * Where the API lives.
+ *
+ * Empty by default, meaning same-origin: `next.config.ts` rewrites `/api/*` to the
+ * backend, so the browser only ever talks to this app's own origin. That is what makes
+ * the session cookie first-party — it is set, sent and expired by one origin, with no
+ * cross-site cookie rules to satisfy and nothing for a browser's third-party cookie
+ * policy to block.
+ *
+ * Setting `NEXT_PUBLIC_API_URL` points the browser straight at the backend instead.
+ * That still works, but the two hosts must then share a registrable domain
+ * (`app.example.com` and `api.example.com`) for a `SameSite=Lax` cookie to travel, and
+ * the backend's `CORS_ORIGINS` must name this app.
+ */
+export const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/$/, "");
 
-const TOKEN_KEY = "numera.workspace-token";
+/** True when the API is reached through this app's own origin. */
+export const SAME_ORIGIN_API = API_BASE === "";
+
+const CSRF_COOKIE = "numera_csrf";
+const CSRF_HEADER = "X-CSRF-Token";
 
 /**
- * Workspace access token, when the backend is running protected.
- *
- * Kept in localStorage rather than a cookie: the token is a shared secret typed by the
- * user, every request that needs it is same-origin JavaScript, and a cookie would be
- * sent on navigations the API never makes.
+ * The session lives in an `HttpOnly` cookie this code cannot read — which is the point:
+ * a script that can read a session token can steal it, and every dependency on the page
+ * is such a script. What we *can* read is the CSRF cookie, which is deliberately not
+ * `HttpOnly` and is worthless on its own. Echoing it back in a header is what proves to
+ * the server that a state-changing request came from this app rather than from a form
+ * on somebody else's site.
  */
-export const auth = {
-  get(): string | null {
-    if (typeof window === "undefined") return null;
-    try {
-      return window.localStorage.getItem(TOKEN_KEY);
-    } catch {
-      return null; // private mode, or site data blocked
+function csrfToken(): string | null {
+  if (typeof document === "undefined") return null;
+  for (const entry of document.cookie.split(";")) {
+    const [name, ...rest] = entry.trim().split("=");
+    // The cookie takes the `__Host-` prefix over HTTPS, where the browser guarantees it
+    // was set by this origin with `Secure` and `Path=/`.
+    if (name === CSRF_COOKIE || name === `__Host-${CSRF_COOKIE}`) {
+      return decodeURIComponent(rest.join("="));
     }
-  },
-  set(token: string | null): void {
-    if (typeof window === "undefined") return;
-    try {
-      if (token) window.localStorage.setItem(TOKEN_KEY, token);
-      else window.localStorage.removeItem(TOKEN_KEY);
-    } catch {
-      /* nothing to do: the user will be asked again next request */
-    }
-  },
-};
+  }
+  return null;
+}
 
-/** Merge the workspace token into a request's headers, if one is stored. */
-function withAuth(init?: RequestInit): RequestInit | undefined {
-  const token = auth.get();
-  if (!token) return init;
-  return {
-    ...init,
-    headers: { ...(init?.headers as Record<string, string> | undefined), Authorization: `Bearer ${token}` },
-  };
+const UNSAFE = /^(POST|PUT|PATCH|DELETE)$/i;
+
+/** Send cookies, and prove the request came from us when it changes something. */
+function withAuth(init?: RequestInit): RequestInit {
+  const headers: Record<string, string> = { ...(init?.headers as Record<string, string> | undefined) };
+  if (UNSAFE.test(init?.method ?? "GET")) {
+    const token = csrfToken();
+    if (token) headers[CSRF_HEADER] = token;
+  }
+  return { ...init, headers, credentials: "include" };
 }
 
 export class ApiError extends Error {
@@ -108,6 +133,19 @@ export class ApiError extends Error {
     super(message);
     this.name = "ApiError";
   }
+
+  /** The session is gone or was never there — the caller should show the sign-in screen. */
+  get isUnauthenticated(): boolean {
+    return this.status === 401;
+  }
+}
+
+/** Notified whenever the API says this browser is no longer signed in. */
+type SessionLostHandler = () => void;
+let onSessionLost: SessionLostHandler | null = null;
+
+export function setSessionLostHandler(handler: SessionLostHandler | null): void {
+  onSessionLost = handler;
 }
 
 async function toApiError(response: Response): Promise<ApiError> {
@@ -124,18 +162,24 @@ async function toApiError(response: Response): Promise<ApiError> {
   );
 }
 
+const UNREACHABLE = SAME_ORIGIN_API
+  ? "Cannot reach the Numera API. Is the backend running?"
+  : `Cannot reach the Numera API at ${API_BASE}. Is the backend running?`;
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`${API_BASE}${path}`, withAuth(init));
   } catch {
-    throw new ApiError(
-      `Cannot reach the Numera API at ${API_BASE}. Is the backend running?`,
-      "network_error",
-      0,
-    );
+    throw new ApiError(UNREACHABLE, "network_error", 0);
   }
-  if (!response.ok) throw await toApiError(response);
+  if (!response.ok) {
+    const error = await toApiError(response);
+    // One place decides what an expired session means, so no caller has to. The bootstrap
+    // call is exempt: "nobody is signed in" is its ordinary answer, not a lost session.
+    if (error.status === 401 && !path.startsWith("/api/auth/")) onSessionLost?.();
+    throw error;
+  }
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
@@ -155,9 +199,13 @@ export async function downloadDocument(
   try {
     response = await fetch(`${API_BASE}${path}`, withAuth(init));
   } catch {
-    throw new ApiError(`Cannot reach the Numera API at ${API_BASE}.`, "network_error", 0);
+    throw new ApiError(UNREACHABLE, "network_error", 0);
   }
-  if (!response.ok) throw await toApiError(response);
+  if (!response.ok) {
+    const error = await toApiError(response);
+    if (error.status === 401) onSessionLost?.();
+    throw error;
+  }
 
   const disposition = response.headers.get("Content-Disposition") ?? "";
   const match = /filename="?([^";]+)"?/i.exec(disposition);
@@ -168,6 +216,127 @@ export async function downloadDocument(
   link.click();
   URL.revokeObjectURL(url);
 }
+
+/**
+ * Accounts and sessions.
+ *
+ * No function here takes or returns a session token: the browser holds it in a cookie
+ * it cannot read, and the server sets and clears it. A password only ever travels up.
+ */
+export const auth = {
+  config: () => request<AuthConfig>("/api/auth/config"),
+  /** The signed-in account, or null. Never throws on "not signed in". */
+  session: () => request<{ user: User | null }>("/api/auth/session"),
+  register: (body: { email: string; password: string; name?: string }) =>
+    request<{ user: User }>("/api/auth/register", { method: "POST", ...json(body) }),
+  login: (body: { email: string; password: string }) =>
+    request<{ user: User }>("/api/auth/login", { method: "POST", ...json(body) }),
+  logout: () => request<{ ok: true }>("/api/auth/logout", { method: "POST" }),
+  forgotPassword: (email: string) =>
+    request<{ ok: true; message: string; reset_link?: string }>("/api/auth/forgot-password", {
+      method: "POST",
+      ...json({ email }),
+    }),
+  resetPassword: (token: string, password: string) =>
+    request<{ user: User }>("/api/auth/reset-password", {
+      method: "POST",
+      ...json({ token, password }),
+    }),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<{ user: User; signed_out_other_devices: boolean }>("/api/auth/change-password", {
+      method: "POST",
+      ...json({ current_password: currentPassword, new_password: newPassword }),
+    }),
+  updateProfile: (name: string) =>
+    request<{ user: User }>("/api/auth/profile", { method: "PATCH", ...json({ name }) }),
+  listSessions: () => request<AuthSession[]>("/api/auth/sessions"),
+  revokeSession: (id: string) =>
+    request<{ ok: true }>(`/api/auth/sessions/${id}`, { method: "DELETE" }),
+  revokeAllSessions: () =>
+    request<{ ok: true }>("/api/auth/sessions/revoke-all", { method: "POST" }),
+  /** Advisory scoring for the sign-up meter. Nothing is stored server-side. */
+  strength: (password: string) =>
+    request<PasswordStrength>("/api/auth/password-strength", {
+      method: "POST",
+      ...json({ password }),
+    }),
+  methods: () => request<SignInMethods>("/api/auth/methods"),
+  disconnectGoogle: () => request<SignInMethods>("/api/auth/google", { method: "DELETE" }),
+  /**
+   * Where to send the browser to sign in with Google — a full-page navigation, not a
+   * fetch. The server redirects to Google and back, and the whole exchange happens
+   * between the two servers; nothing from it passes through this code.
+   */
+  googleStartUrl: (options: { next?: string; intent?: "signin" | "link" } = {}) => {
+    const params = new URLSearchParams();
+    if (options.next && options.next !== "/") params.set("next", options.next);
+    if (options.intent === "link") params.set("intent", "link");
+    const query = params.toString();
+    return `${API_BASE}/api/auth/google/start${query ? `?${query}` : ""}`;
+  },
+};
+
+/** What to tell somebody whose Google sign-in came back with an error code. */
+export function googleErrorMessage(code: string): string {
+  const messages: Record<string, string> = {
+    google_cancelled: "Google sign-in was cancelled.",
+    google_expired: "That sign-in took too long or was started in another tab. Please try again.",
+    google_unavailable: "Sign in with Google is not enabled on this workspace.",
+    google_email_unverified: "Your Google account's email address is not verified with Google.",
+    google_link_required:
+      "An account already uses this email. Sign in with your password, then connect Google from your account page.",
+    google_in_use: "That Google account is already connected to a different Numera account.",
+    google_already_linked: "A Google account is already connected. Disconnect it first.",
+    google_unreachable: "Couldn't reach Google. Check your connection and try again.",
+    registration_closed: "Sign-up is closed on this workspace. Ask an administrator for an invitation.",
+    domain_not_allowed: "Sign-up on this workspace is limited to specific email domains.",
+    user_limit_reached: "This workspace has reached its account limit.",
+    account_suspended: "This account has been suspended. Contact an administrator.",
+    rate_limited: "Too many attempts. Wait a few minutes and try again.",
+  };
+  return messages[code] ?? "Google sign-in didn't complete. Please try again.";
+}
+
+/** Administration. Every call is refused with 403 for a non-admin account. */
+export const admin = {
+  overview: () => request<AdminOverview>("/api/admin/overview"),
+  listUsers: (params: { q?: string; role?: Role; status?: AccountStatus } = {}) => {
+    const query = new URLSearchParams();
+    if (params.q) query.set("q", params.q);
+    if (params.role) query.set("role", params.role);
+    if (params.status) query.set("status", params.status);
+    const suffix = query.toString();
+    return request<AdminUser[]>(`/api/admin/users${suffix ? `?${suffix}` : ""}`);
+  },
+  getUser: (id: string) => request<AdminUserDetail>(`/api/admin/users/${id}`),
+  createUser: (body: { email: string; password: string; name?: string; role?: Role }) =>
+    request<User>("/api/admin/users", { method: "POST", ...json(body) }),
+  updateUser: (id: string, patch: { name?: string; role?: Role; status?: AccountStatus }) =>
+    request<User>(`/api/admin/users/${id}`, { method: "PATCH", ...json(patch) }),
+  setPassword: (id: string, password: string) =>
+    request<{ ok: true; must_change_password: boolean }>(`/api/admin/users/${id}/password`, {
+      method: "POST",
+      ...json({ password }),
+    }),
+  revokeSessions: (id: string) =>
+    request<{ ok: true }>(`/api/admin/users/${id}/sessions/revoke-all`, { method: "POST" }),
+  /** Irreversible: erases the account and its entire private workspace. */
+  deleteUser: (id: string, confirmEmail: string) =>
+    request<{ ok: true }>(
+      `/api/admin/users/${id}?confirm_email=${encodeURIComponent(confirmEmail)}`,
+      { method: "DELETE" },
+    ),
+  audit: (params: { limit?: number; user_id?: string; event?: string } = {}) => {
+    const query = new URLSearchParams({ limit: String(params.limit ?? 100) });
+    if (params.user_id) query.set("user_id", params.user_id);
+    if (params.event) query.set("event", params.event);
+    return request<AuditEvent[]>(`/api/admin/audit?${query}`);
+  },
+  purgeSessions: () =>
+    request<{ removed_sessions: number }>("/api/admin/maintenance/purge-sessions", {
+      method: "POST",
+    }),
+};
 
 export const api = {
   health: () => request<Health>("/api/health"),
@@ -377,7 +546,7 @@ export const api = {
     request<SessionSummary>(`/api/sessions/${id}`, { method: "PATCH", ...json({ title }) }),
   deleteSession: (id: string) => request<void>(`/api/sessions/${id}`, { method: "DELETE" }),
   exportSession: async (id: string) => {
-    const response = await fetch(`${API_BASE}/api/sessions/${id}/export`);
+    const response = await fetch(`${API_BASE}/api/sessions/${id}/export`, withAuth());
     if (!response.ok) throw await toApiError(response);
     return response.text();
   },

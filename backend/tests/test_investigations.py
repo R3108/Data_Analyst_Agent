@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from app.agent.investigations import build_synthesis_input
 from app.agent.schemas import ResearchPlan
 from app.main import create_app
-from tests.conftest import REPORT, ScriptedLLM, make_plan
+from tests.conftest import REPORT, ScriptedLLM, make_plan, sign_in
 from tests.test_api import _parse_sse
 
 CODE = """
@@ -68,6 +68,7 @@ def dataset(settings):
         client = TestClient(create_app(settings, llm=llm))
         client.__enter__()
         opened.append(client)
+        sign_in(client)
         csv = (
             "Region,Revenue,Order Date\n"
             "North,1000,2024-01-01\nSouth,500,2024-02-01\n"
@@ -235,5 +236,6 @@ def test_a_failed_scope_reports_an_error_and_runs_nothing(dataset):
 
 def test_investigating_an_unknown_session_is_a_404(settings):
     with TestClient(create_app(settings, llm=scripted())) as client:
+        sign_in(client)
         response = client.post("/api/sessions/ses_missing/investigate", json={})
         assert response.status_code == 404

@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
+import { Suspense } from "react";
 
+import { SessionProvider } from "@/lib/session";
 import { ThemeProvider, themeBootScript } from "@/lib/theme";
 import { ToastProvider } from "@/components/ui/toast";
 
@@ -26,7 +28,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         <ThemeProvider>
-          <ToastProvider>{children}</ToastProvider>
+          <ToastProvider>
+            {/* The provider reads the current route so it can send an expired session
+                back to the page it was on. */}
+            <Suspense>
+              <SessionProvider>{children}</SessionProvider>
+            </Suspense>
+          </ToastProvider>
         </ThemeProvider>
       </body>
     </html>

@@ -56,7 +56,8 @@ here comes with a verification score instead of a shrug.
 | 🧭 **Deep research** | *Investigate* scopes an objective into several questions, runs each through the **full agent graph**, and synthesises one brief. Every sub-analysis is an ordinary message — its code, charts and verification verdict all inspectable, pinnable and exportable — and the synthesis is told which steps failed, so it cannot launder a broken one into confident prose. |
 | 🧠 **Analysis memory** | Before a question is planned, the closest prior answers on the same dataset are found by TF-IDF — no embedding model — and shown to you *before the work starts*, so a repeat question can be stopped instead of paid for twice. The agent gets them as continuity context, explicitly labelled as historical. **Ask anywhere**: `/api/route` also picks which dataset a question belongs to. |
 | 🗓️ **Scheduled briefings** | A monitor watches one number for free; a briefing re-asks a *question in English* on a cadence and delivers the written answer to Slack or an inbox — with a link to the full analysis, so nobody takes the number on faith. The cost difference is stated in the UI, not buried in the docs. |
-| 💬 **Collaboration** | Comment threads anchored to the analysis, board or tile they are about, resolvable as a unit. A workspace **activity feed** shows who uploaded, synced, asked, pinned and shared. Optional **bearer-token access control** turns the open local tool into a shared workspace without inventing a user database. |
+| 💬 **Collaboration** | Comment threads anchored to the analysis, board or tile they are about, resolvable as a unit. A workspace **activity feed** shows who uploaded, synced, asked, pinned and shared. |
+| 🔐 **Accounts & isolation** | Registration, sign-in, password recovery and an admin dashboard — with a **separate database and file store per account**, so isolation is physical rather than a `WHERE` clause somebody can forget. Argon2id hashes, opaque server-side sessions in `HttpOnly` cookies, double-submit CSRF, `Origin` verification, per-account lockout and an audit log. Revocation is immediate: suspending an account or changing a password takes effect on the next request, not whenever a token expires. |
 | 📐 **Semantic layer** | Define your metrics, rules and glossary once per dataset. They are injected into every prompt as binding instructions — and the verifier flags answers whose code doesn't appear to follow them. |
 | 🛡️ **Data contracts** | Expectations the table must keep meeting — schema, types, completeness, uniqueness, ranges, category sets and freshness. Suggested from the first upload, inherited by every version, and checked **the moment new data lands**, so a dropped column is caught on arrival rather than three answers later. |
 | 🔔 **Metric monitors** | Watch any KPI. Numera snapshots the code that produced it and re-runs it on demand, on a schedule, or automatically when new data lands — **zero tokens per check** — with thresholds, breach history and a Markdown briefing. |
@@ -561,16 +562,104 @@ thread resolves its replies, because a half-resolved thread is a to-do list nobo
 and shared. Recording an entry can never fail the action it describes — every call swallows its own
 errors — because an audit line is a description of something that already succeeded.
 
-**Access control** is opt-in and deliberately small. Unset, the workspace is open, which is right
-for a tool pointed at your own laptop. Set `WORKSPACE_TOKENS` to `token:Display Name` pairs and
-every API call needs a bearer token, with the matched name attributed to the comments and activity
-that person leaves. There are no passwords to leak, no sessions to fixate and no roles to get
-wrong — it is a shared secret per person, honest about what it protects. Public share links keep
-working either way: they carry their own unguessable token and are read-only by construction.
+---
 
-> **Scope note.** This is team-level access control, not multi-tenancy: everyone who holds a token
-> sees the same workspace. Per-user data isolation would need a real identity model and row-level
-> ownership, and pretending otherwise would be worse than saying so.
+## Accounts: one workspace each, isolated by construction
+
+Numera is multi-user. Everyone registers, signs in, and gets a workspace nobody else can reach.
+
+### Isolation is physical, not a `WHERE` clause
+
+```
+data/
+  auth.db                            ← accounts, sessions, audit. The only shared store.
+  users/
+    usr_a1b2…/numera.db              ← that person's datasets, boards, monitors, messages
+    usr_a1b2…/datasets/ds_…/clean.parquet
+    usr_c3d4…/numera.db
+```
+
+Each account gets its own SQLite file and its own directory of cleaned tables. A request is bound
+to one of each, and every service — the analyst, the sandbox, the exporters — is constructed
+against that binding.
+
+The obvious alternative is an `owner_id` column and a predicate on every query. That scheme is only
+as strong as its least careful query, and this codebase has thousands of lines of analytics SQL, a
+code sandbox that reads Parquet by path, and exporters that stream those files back out. One
+forgotten predicate anywhere in that surface is a cross-tenant leak. Here there is no predicate to
+forget: a query that "forgets" to scope itself cannot see anything else, because nothing else is
+open. It also makes the operational questions trivial — exporting one customer's data is a `tar` of
+a directory, deleting it is an `rm -rf`, and neither can catch a neighbour's rows.
+
+The cost is real and paid deliberately: the background sweeps walk accounts rather than tables, and
+cross-account reporting is an aggregation rather than a `GROUP BY`.
+
+### Sessions you can actually revoke
+
+The session is an opaque 256-bit token in an `HttpOnly` cookie, stored server-side as a keyed
+digest. Not a JWT — revocation has to be immediate and honest. Suspending an account, changing a
+password or signing out a stolen laptop takes effect on the *next request*, which is not true of a
+self-contained token that stays valid until it happens to expire.
+
+Every reason a session can be dead is checked on every request: revoked, idle out, past its
+absolute lifetime, belonging to a suspended or deleted account, or minted before the account's
+epoch was bumped by a password change. A password change signs every other device out, because a
+password change is usually a response to a suspected compromise.
+
+- **`HttpOnly`** — a script cannot read the token, so an XSS bug in the app or any dependency it
+  loads cannot exfiltrate a login. This is why the token is not in `localStorage`.
+- **`__Host-` prefix** over HTTPS — a compromised sibling subdomain cannot overwrite the session.
+- **Double-submit CSRF** — a readable CSRF cookie echoed in `X-CSRF-Token` on every write, plus
+  `Origin` verification on every state-changing request.
+- **First-party by default** — Next rewrites `/api` to the backend, so the cookie is set, sent and
+  expired by one origin. No cross-site cookie rules, no CORS preflight per call.
+
+### Passwords, and what happens when they are forgotten
+
+Argon2id (`argon2-cffi`), with PBKDF2-HMAC-SHA256 at 600k iterations as a fallback so a stripped
+install still stores nothing reversible. Hashes carry their own parameters, so raising the cost
+later upgrades people on their next sign-in rather than forcing a reset.
+
+The policy follows NIST SP 800-63B: length is what matters, composition rules are not required,
+and the useful screening is against obvious and context-specific guesses — the app name, your own
+email, the short list of strings everybody tries first.
+
+Failure is uniform on purpose. An unknown address, a wrong password and a locked account all
+return the same message, and a sign-in against an address that does not exist still pays the cost
+of an Argon2 verify, so the answer cannot be timed either. A reset request reports success whether
+or not the address exists. **An attacker who can enumerate your users has already done half the
+work of a credential-stuffing campaign, and the feature that leaks them is almost always a helpful
+error message.** Reset links are single-use, short-lived, hashed at rest, and retired the moment a
+newer one is issued.
+
+### Roles and the admin dashboard
+
+Two roles, `admin` and `user`. The first account created on an empty deployment becomes the
+administrator; after that an admin invites people, or open sign-up does (optionally restricted to
+your email domains, or closed entirely).
+
+The dashboard at `/admin` manages *accounts*, not their contents: create, suspend, promote, set a
+temporary password, sign every device out, delete an account and erase its workspace. It shows
+metadata — dataset counts, disk usage, last sign-in — and there is deliberately **no route that
+reads another person's datasets, messages or boards.** That is enough to run the service and
+answer a support ticket, and not enough to read a customer's revenue figures over their shoulder.
+It also carries an audit log and a posture panel that names the environment variable behind each
+check.
+
+Authorization is enforced on the server. The UI hides what you cannot use, but hiding is
+presentation: typing `/admin` as a member renders a refusal, and every call that page would make
+is answered `403` on the server's own authority.
+
+Public share links keep working without an account — they carry their own unguessable secret,
+prefixed with the owner's account id so a signed-out request can find the right workspace, and
+they are read-only by construction. A suspended account's links go dark with it.
+
+### Upgrading an existing single-user install
+
+Start the new version and it just works: the first person to register becomes the administrator,
+and an existing `data/numera.db` plus its `datasets/` directory is moved into that account on
+first start. Nothing is orphaned and re-running is a no-op. For an unattended deploy, set
+`BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` instead.
 
 ---
 
@@ -683,7 +772,10 @@ the numeric digest the sandbox already captures for every figure.
 
 ```bash
 cp .env.example .env        # Windows: copy .env.example .env
-# then set OPENAI_API_KEY=... in .env
+# then set in .env:
+#   OPENAI_API_KEY=...
+#   AUTH_SECRET=...        # required in production; generate one with:
+#                          #   python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
 ### 2. Backend
@@ -706,21 +798,29 @@ API docs are served at <http://localhost:8000/docs>.
 
 ```bash
 cd frontend
-cp .env.example .env.local   # optional; defaults to http://localhost:8000
+cp .env.example .env.local   # optional; BACKEND_URL defaults to http://localhost:8000
 npm install
 npm run dev
 ```
 
-Open <http://localhost:3000>, click **Try sample retail data** (or upload your own file) and ask away.
+Open <http://localhost:3000>. The first visit lands on the sign-up screen — **the first account
+created becomes the administrator.** Then click **Try sample retail data** (or upload your own
+file) and ask away.
+
+The browser talks only to `:3000`; `/api/*` is rewritten to the backend, which is what makes the
+session a first-party cookie. Set `NEXT_PUBLIC_API_URL` to point the browser straight at the
+backend instead — supported, but the two hosts must then share a registrable domain.
 
 ### Docker
 
 ```bash
-cp .env.example .env   # add your key
+cp .env.example .env   # add OPENAI_API_KEY and AUTH_SECRET
 docker compose up --build
 ```
 
-Frontend on `:3000`, backend on `:8000`, data persisted in the `numera-data` volume.
+Frontend on `:3000`, backend on `:8000`, every account's database and cleaned tables persisted in
+the `numera-data` volume. Compose refuses to start without `AUTH_SECRET`, because a generated one
+would sign everybody out on each restart and on every extra worker.
 
 ---
 
@@ -742,7 +842,6 @@ All settings are environment variables (read from `.env` at the repo root or in 
 | `INVESTIGATION_MAX_STEPS` | `4` | Analyses per deep-research run. Cost ≈ this many questions, plus two calls. |
 | `BRIEFING_INTERVAL_MINUTES` | `0` | Sweep for saved questions due to re-run; `0` disables it. **Each run costs tokens.** |
 | `SOURCE_SYNC_INTERVAL_MINUTES` | `0` | Sweep for connected databases due to refresh; `0` disables it. Each source also has its own interval. |
-| `WORKSPACE_TOKENS` | — | `token:Name` pairs. Empty leaves the workspace open; set it to require a bearer token and attribute actions to people. |
 | `SANDBOX_TIMEOUT_S` | `60` | Wall-clock limit per execution. |
 | `SANDBOX_MEMORY_MB` | `2048` | Memory limit per execution (process tree RSS). |
 | `MONITOR_INTERVAL_MINUTES` | `0` | Background monitor sweep interval; `0` disables the scheduler (monitors still run on demand and on new dataset versions). Checks cost no model tokens. |
@@ -757,8 +856,27 @@ All settings are environment variables (read from `.env` at the repo root or in 
 | `MAX_UPLOAD_MB` | `50` | Upload size limit. |
 | `MAX_ROWS` | `2000000` | Row limit per dataset. |
 | `DATA_DIR` | `backend/data` | SQLite database and Parquet files. |
-| `CORS_ORIGINS` | `http://localhost:3000,…` | Comma-separated allowed origins. |
-| `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | *(frontend)* Backend URL as seen by the browser. |
+| `CORS_ORIGINS` | `http://localhost:3000,…` | The origins the browser app is served from. A trust list, not a convenience: checked on every state-changing request as well as by CORS. `PUBLIC_BASE_URL` is trusted too. |
+| `TRUST_FORWARDED_FOR` | `false` | Read the client address from `X-Forwarded-For`. Turn on **only** behind a reverse proxy that sets it; exposed directly it is attacker-controlled. |
+| **Accounts & sessions** | | |
+| `AUTH_SECRET` | — | **Required in production.** Keys session and reset tokens at rest. Rotating it signs every account out. |
+| `BOOTSTRAP_ADMIN_EMAIL` / `_PASSWORD` | — | Create the first administrator on an empty database. Unset, the first person to register becomes one. |
+| `REGISTRATION_ENABLED` | `true` | Open sign-up. `false` makes the deployment invite-only (the very first account is always allowed). |
+| `GOOGLE_CLIENT_ID` · `GOOGLE_CLIENT_SECRET` | — | Enable **Sign in with Google** (OpenID Connect, code flow + PKCE, server side). Register `<PUBLIC_BASE_URL>/api/auth/google/callback` as the redirect URI. Sign-up rules apply to Google accounts too. |
+| `GOOGLE_REDIRECT_URI` | derived | Override the callback URL when it is not `PUBLIC_BASE_URL` + `/api/auth/google/callback`. |
+| `REGISTRATION_ALLOWED_DOMAINS` | — | Restrict sign-up to one or more email domains. |
+| `MAX_USERS` | `0` | Seat cap; `0` is unlimited. |
+| `SESSION_IDLE_DAYS` | `7` | An unused session expires. |
+| `SESSION_ABSOLUTE_DAYS` | `30` | Hard ceiling that activity never extends, so a stolen cookie dies on its own. |
+| `COOKIE_SECURE` | *(production)* | Unset means "Secure in production, not in development". Over HTTPS the cookies also take the `__Host-` prefix. |
+| `COOKIE_SAMESITE` / `COOKIE_DOMAIN` | `lax` / — | Set a domain only when the app and API are on different subdomains of one site. |
+| `LOGIN_MAX_ATTEMPTS` / `LOGIN_WINDOW_MINUTES` | `10` / `15` | Sign-in throttle, per client address. |
+| `LOCKOUT_THRESHOLD` / `LOCKOUT_MINUTES` | `8` / `15` | Per-account lockout, so a distributed guessing attack is still stopped. |
+| `REGISTER_MAX_PER_HOUR` / `RESET_MAX_PER_HOUR` | `5` / `5` | Sign-up and reset-request throttles. |
+| `RESET_TOKEN_TTL_MINUTES` | `30` | Lifetime of a password-reset link. Single-use regardless. |
+| `EXPOSE_RESET_LINK` | `false` | Development only: return the reset link in the response when SMTP is unconfigured. Ignored in production. |
+| `BACKEND_URL` | `http://localhost:8000` | *(frontend, server-only)* Where `/api` is rewritten to. Never reaches the browser bundle. |
+| `NEXT_PUBLIC_API_URL` | — | *(frontend)* Optional. Points the browser straight at the backend and disables the rewrite. |
 
 ---
 
@@ -838,8 +956,30 @@ All settings are environment variables (read from `.env` at the repo root or in 
 | `GET` | `/api/activity?limit=50` | Who did what in this workspace, newest first |
 | `POST` | `/api/route` | Which dataset can answer this question? **No model call** |
 | `GET` | `/api/recall?q=&dataset_id=` | Prior analyses close to a question — the same search the agent gets |
-| `GET` | `/api/me` | The name this token is attributed to, and whether the workspace is protected |
+| `GET` | `/api/me` | The signed-in account: id, email, name and role |
 | `GET` | `/api/usage?days=30` | Token totals, estimated spend by day and monthly budget status |
+| **Accounts** | | *(open: `config`, `register`, `login`, `forgot-password`, `reset-password`)* |
+| `GET` | `/api/auth/config` | What the sign-in screens need before anyone is signed in. Discloses nothing about who has an account |
+| `POST` | `/api/auth/register` · `/api/auth/login` | Create an account / sign in. Sets the session and CSRF cookies |
+| `POST` | `/api/auth/logout` | End this session and clear the cookies. Always succeeds |
+| `GET` | `/api/auth/session` | The signed-in account, or `null`. Never a 401 — "not signed in" is an answer, not an error |
+| `POST` | `/api/auth/forgot-password` | Send a reset link. Same response whether or not the address exists |
+| `POST` | `/api/auth/reset-password` | Spend a single-use link and sign in with the new password |
+| `POST` | `/api/auth/change-password` | Change your own password. Signs every other device out and rotates this one |
+| `PATCH` | `/api/auth/profile` | Change your display name |
+| `GET` · `DELETE` | `/api/auth/sessions` · `/{id}` | Your signed-in devices / sign one out |
+| `POST` | `/api/auth/sessions/revoke-all` | Sign out everywhere, including here |
+| `GET` | `/api/auth/google/start` | Browser navigation: begin Google sign-in (`?next=/path`), or `?intent=link` to connect Google to the signed-in account |
+| `GET` | `/api/auth/google/callback` | Google redirects here. Verifies state, nonce and PKCE, then signs in, links or creates the account and redirects into the app |
+| `GET` · `DELETE` | `/api/auth/methods` · `/api/auth/google` | How this account can sign in / disconnect Google (refused while it is the only way in) |
+| **Administration** | | *(all require the `admin` role)* |
+| `GET` | `/api/admin/overview` | Account, session, storage and security-posture summary |
+| `GET` · `POST` | `/api/admin/users` | Accounts with usage metadata / create one with a temporary password |
+| `GET` · `PATCH` | `/api/admin/users/{id}` | Detail with sessions and recent events / rename, change role or status |
+| `POST` | `/api/admin/users/{id}/password` | Set a temporary password, signing the account out everywhere |
+| `POST` | `/api/admin/users/{id}/sessions/revoke-all` | Sign every device out |
+| `DELETE` | `/api/admin/users/{id}?confirm_email=` | Delete the account and erase its workspace. Irreversible |
+| `GET` | `/api/admin/audit` | Authentication and administration events, newest first |
 
 **SSE events** from `/chat` and `/investigate`: `session`, `user_message`, `recall`
 (prior answers to a similar question, sent *before* the work starts), `step`
@@ -847,13 +987,20 @@ All settings are environment variables (read from `.env` at the repo root or in 
 tables, code, report and verification — an investigation emits one per sub-analysis, then the
 brief), `error` (`{code, message}`) and `done`. Keep-alive comments are sent every 15 s.
 
-**Authentication.** When `WORKSPACE_TOKENS` is set, every `/api` route except `/api/health` and
-`/api/share/{token}` requires `Authorization: Bearer <token>`; a rejected call returns
-`401 {"error": {"code": "unauthorized", …}}`. Unset, no header is needed anywhere.
+**Authentication.** Every `/api` route requires a session except `/api/health`, `/api/auth/*` and
+`/api/share/{token}`. This is enforced by middleware rather than per-route, so a route added later
+cannot forget it — the default is closed and the open list is short and explicit.
+
+Browsers authenticate with the `HttpOnly` session cookie and must echo the CSRF cookie in
+`X-CSRF-Token` on every write. Scripts and CI can send `Authorization: Bearer <session token>`
+instead, which carries no ambient credential and so needs no CSRF token. State-changing requests
+are additionally checked against `Origin`; a missing header (a non-browser client) is fine, a
+foreign one is `403 origin_rejected`.
 
 **Errors** always look like `{"error": {"code": "...", "message": "..."}}` — e.g.
-`unsupported_file`, `payload_too_large`, `invalid_input`, `not_found`, `llm_not_configured`,
-`llm_rate_limited`, `llm_refusal`.
+`not_authenticated`, `csrf_failed`, `admin_required`, `invalid_credentials`, `weak_password`,
+`email_taken`, `rate_limited` (with `Retry-After`), `unsupported_file`, `payload_too_large`,
+`invalid_input`, `not_found`, `llm_not_configured`, `llm_rate_limited`, `llm_refusal`.
 
 ---
 
@@ -864,39 +1011,48 @@ brief), `error` (`{code, message}`) and `done`. Keep-alive comments are sent eve
 │   ├── app/
 │   │   ├── agent/        # LangGraph graph, nodes (incl. verify), prompts, schemas, LLM client,
 │   │   │                 # chat service, investigations (deep research orchestrator)
-│   │   ├── api/          # FastAPI routers (system incl. route/recall/activity, datasets incl.
-│   │   │                 # significance + scenarios + cohorts + forecast + privacy,
-│   │   │                 # sessions + SSE chat/investigate, boards, monitors incl. diagnose,
-│   │   │                 # alerts, share, sources, comments, briefings)
+│   │   ├── api/          # FastAPI routers (system incl. route/recall/activity, auth, admin,
+│   │   │                 # datasets incl. significance + scenarios + cohorts + forecast +
+│   │   │                 # privacy, sessions + SSE chat/investigate, boards, monitors incl.
+│   │   │                 # diagnose, alerts, share, sources, comments, briefings) + deps,
+│   │   │                 # which binds every service to the caller's own workspace
+│   │   ├── auth/         # control-plane store (accounts, sessions, resets, throttles, audit),
+│   │   │                 # sign-in/registration/recovery service, session & CSRF cookies
 │   │   ├── core/         # settings, typed errors, logging, JSON serialisation, number
-│   │   │                 # formatting, optional workspace auth middleware
+│   │   │                 # formatting, password hashing & policy, auth middleware,
+│   │   │                 # per-user workspace registry
 │   │   ├── sandbox/      # AST policy, process runner + watchdog, isolated worker
 │   │   ├── services/     # ingestion, cleaning, profiling, privacy, signals, drivers, statistics,
 │   │   │                 # scenarios, cohorts, forecasting, diagnosis, memory, sources, semantics,
 │   │   │                 # contracts, verification, monitors, briefings, notifications, comments,
 │   │   │                 # activity, versions, notebook, documents (PDF/PPTX), boards, sharing
-│   │   ├── db.py         # SQLite persistence (datasets + lineage + contracts + privacy policy,
+│   │   ├── db.py         # per-user SQLite persistence (datasets + lineage + contracts + privacy,
 │   │   │                 # sessions, boards, monitors + runs with root cause, alert channels
 │   │   │                 # + delivery log, sources, comments, activity, briefings)
-│   │   └── main.py       # app factory (dependency-injectable LLM, sandbox & alert transport)
-│   │                     # + monitor, digest, source-refresh and briefing schedulers
+│   │   └── main.py       # app factory (dependency-injectable LLM, sandbox, alert transport
+│   │                     # and mailer) + security headers, admin bootstrap, and the monitor,
+│   │                     # digest, source-refresh, briefing and session-janitor schedulers
 │   ├── scripts/generate_sample_data.py
 │   └── tests/            # pipeline, sandbox security, agent graph, verification, semantics,
 │                         # drivers, statistics, scenarios, cohorts, forecasting, privacy,
 │                         # diagnosis, memory, sources, collaboration, investigations, briefings,
-│                         # contracts, notifications, versions, monitors, exports, API end-to-end
+│                         # contracts, notifications, versions, monitors, exports, API end-to-end,
+│                         # auth (sessions, CSRF, roles, isolation, recovery)
 ├── frontend/
 │   └── src/
-│       ├── app/          # layout, page, design tokens (globals.css)
-│       ├── components/   # workspace, workspace gate, sidebar, welcome, data panel (incl.
+│       ├── app/          # layout, page, login/register/forgot/reset, account, admin,
+│       │                 # design tokens (globals.css)
+│       ├── proxy.ts      # optimistic signed-out redirect (Next 16's renamed middleware)
+│       ├── components/   # workspace, auth/* (shell, forms, account & devices), admin/*
+│       │                 # (dashboard, accounts, audit, posture), sidebar, welcome, data panel (incl.
 │       │                 # contract and privacy tabs), drivers / significance / scenarios /
 │       │                 # cohorts / forecast / sources / briefings / monitors views (the last
 │       │                 # with root cause on breach), alerts panel, comments panel,
 │       │                 # activity feed, export menu, watch, boards/*,
 │       │                 # chat/* (incl. verification badge, recall notice, investigation card),
 │       │                 # ui/*
-│       └── lib/          # API + SSE client (incl. workspace token), types, formatting, theme,
-│                         # Plotly theming
+│       └── lib/          # API + SSE client (cookie auth + CSRF), session provider and route
+│                         # gate, types, formatting, theme, Plotly theming
 ├── sample_data/retail_sales.csv   # realistic, deliberately messy demo data
 └── docker-compose.yml
 ```
@@ -910,7 +1066,7 @@ cd backend
 pytest
 ```
 
-The suite (414 tests) covers the cleaning and profiling pipeline, proactive signals and
+The suite (450 tests) covers the cleaning and profiling pipeline, proactive signals and
 forecasting, CSV/Excel ingestion edge cases, sandbox policy and runtime escapes (file writes,
 secret leakage, timeouts), the full agent graph including the self-repair loop and graceful
 failure paths, every verification check (grounding tolerances, percent-scale bugs, ignored
@@ -921,8 +1077,8 @@ kind, inheritance across versions and enforcement on upload), alert delivery (su
 transition-only firing, failure isolation and URL redaction), dataset version lineage and diffs,
 monitor evaluation including breaches and auto-re-checks on new versions, notebook/PDF/PPTX
 exports (including the notebook's cells compiling as valid Python), boards and revocable share
-links, schema migration, usage accounting, and the HTTP API end-to-end including SSE streaming
-and chat history.
+links, schema migration, usage accounting, authentication end-to-end, and the HTTP API including
+SSE streaming and chat history.
 
 The newer capabilities are held to the same standard, and several of the tests exist to pin down
 behaviour that is easy to get quietly wrong:
@@ -971,8 +1127,15 @@ behaviour that is easy to get quietly wrong:
   thing switchable off.
 - **Collaboration and briefings** — thread flattening and cascade-resolve, cadence arithmetic,
   delivery reaching only subscribed channels, one broken briefing not stopping the sweep, and a
-  protected workspace rejecting a missing or wrong token while a client-supplied name cannot
-  override the one the token carries.
+  comment attributed to the signed-in account rather than to the name the client supplied.
+- **Accounts** — a wrong password and an unknown address returning byte-identical responses, a
+  locked account saying exactly what a wrong password says, a password change killing another
+  device's live session, a second account seeing an empty workspace and getting a 404 when it
+  addresses the first account's rows by id, a write without the CSRF header refused, a write from
+  a foreign origin refused, a demoted admin losing the admin API on the next request, a reset link
+  working once and never again, a temporary password buying nothing but the chance to replace it,
+  deleting an account erasing its directory, and the plaintext password appearing nowhere in
+  `auth.db`.
 
 The LLM and the alert transport are both replaced by scripted fakes and SQL sources are tested
 against a throwaway SQLite file, so tests are fast, deterministic, free and never touch the

@@ -55,9 +55,9 @@ import { Button, IconButton } from "@/components/ui/primitives";
 import { useToast } from "@/components/ui/toast";
 import { WatchProvider } from "@/components/watch";
 import { Welcome } from "@/components/welcome";
-import { WorkspaceGate } from "@/components/workspace-gate";
 import { ApiError, api, streamChat, streamInvestigation } from "@/lib/api";
 import { cn } from "@/lib/cn";
+import { useSession } from "@/lib/session";
 import { useTheme } from "@/lib/theme";
 import type {
   BoardDetail,
@@ -66,7 +66,6 @@ import type {
   DatasetSummary,
   DriverQuery,
   Health,
-  Identity,
   Message,
   MonitorDigest,
   Semantics,
@@ -145,6 +144,9 @@ const slugify = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, "-")
 export function Workspace() {
   const toast = useToast();
   const { setMode } = useTheme();
+  // The signed-in account. `RequireSession` above has already guaranteed there is one;
+  // every request below is authorised again by the server regardless.
+  const { user, isAdmin, signOut } = useSession();
   const [health, setHealth] = useState<Health | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
   const [usage, setUsage] = useState<UsageReport | null>(null);
@@ -159,9 +161,6 @@ export function Workspace() {
   const [view, setView] = useState<
     { kind: WorkspaceView; datasetId: string | null; query: DriverQuery } | null
   >(null);
-  const [identity, setIdentity] = useState<Identity | null>(null);
-  // Null until health has answered; true only when the server demands a token we lack.
-  const [locked, setLocked] = useState(false);
   const [queuedQuestion, setQueuedQuestion] = useState<string | null>(null);
   const [digest, setDigest] = useState<MonitorDigest | null>(null);
   const [pending, setPending] = useState<PendingTurn | null>(null);
@@ -289,13 +288,6 @@ export function Workspace() {
       .health()
       .then(setHealth)
       .catch((error) => setHealthError(describe(error)));
-    api
-      .me()
-      .then(setIdentity)
-      .catch((error) => {
-        // 401 means the workspace is protected and this browser has no valid token.
-        if (error instanceof ApiError && error.status === 401) setLocked(true);
-      });
     void refreshLists();
     const params = new URLSearchParams(window.location.search);
     const initialSession = params.get("session");
@@ -729,19 +721,6 @@ export function Workspace() {
   const watchContext = useMemo(() => ({ onCreated: () => void refreshDigest() }), [refreshDigest]);
   const headerTitle = view ? VIEW_TITLES[view.kind] : (board?.title ?? session?.title);
 
-  if (locked) {
-    return (
-      <WorkspaceGate
-        onAuthenticated={(name) => {
-          setIdentity({ name, protected: true });
-          setLocked(false);
-          void refreshLists();
-          api.health().then(setHealth).catch(() => undefined);
-        }}
-      />
-    );
-  }
-
   return (
     <PinProvider value={pinContext}>
       <WatchProvider value={watchContext}>
@@ -758,7 +737,9 @@ export function Workspace() {
           activeSessionId={session?.id ?? null}
           activeBoardId={boardId}
           activeView={view?.kind ?? null}
-          identity={identity}
+          user={user}
+          isAdmin={isAdmin}
+          onSignOut={() => void signOut()}
           monitorDigest={digest}
           onSelectSession={openSession}
           onSelectBoard={openBoard}

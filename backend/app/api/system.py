@@ -6,8 +6,8 @@ from fastapi import APIRouter, Body, Depends, Query, Request
 from pydantic import BaseModel, Field
 
 from app import __version__
-from app.api.deps import get_activity, get_db, get_settings_dep
-from app.core.auth import actor, parse_tokens
+from app.api.deps import get_activity, get_db, get_identity, get_settings_dep
+from app.core.auth import Identity, identity_of
 from app.core.config import Settings
 from app.db import Database
 from app.services import memory
@@ -24,10 +24,21 @@ class RouteBody(BaseModel):
 
 
 @router.get("/health")
-def health(settings: Settings = Depends(get_settings_dep)) -> dict[str, Any]:
+def health(request: Request, settings: Settings = Depends(get_settings_dep)) -> dict[str, Any]:
+    """Liveness, and — once signed in — how this deployment is configured.
+
+    The anonymous half is deliberately thin. A health endpoint is reachable from the
+    open internet, and the model in use, the upload ceiling and the alerting setup are
+    reconnaissance, not liveness. Signed-in callers get the whole picture, which is what
+    the workspace banners and the settings panels actually read.
+    """
+    public: dict[str, Any] = {"status": "ok", "version": __version__, "authenticated": False}
+    if identity_of(request) is None:
+        return public
+
     return {
-        "status": "ok",
-        "version": __version__,
+        **public,
+        "authenticated": True,
         "model": settings.openai_model,
         "llm_credentials_detected": settings.llm_credentials_detected,
         "sandbox": {"timeout_s": settings.sandbox_timeout_s, "memory_mb": settings.sandbox_memory_mb},
@@ -48,7 +59,7 @@ def health(settings: Settings = Depends(get_settings_dep)) -> dict[str, Any]:
             "dialects": sorted(DIALECTS),
             "sync_interval_minutes": settings.source_sync_interval_minutes,
         },
-        "workspace": {"protected": bool(parse_tokens(settings.workspace_tokens))},
+        "workspace": {"protected": True, "isolation": "per-user database"},
         "limits": {
             "max_upload_mb": settings.max_upload_mb,
             "max_rows": settings.max_rows,
@@ -58,9 +69,14 @@ def health(settings: Settings = Depends(get_settings_dep)) -> dict[str, Any]:
 
 
 @router.get("/me")
-def me(request: Request, settings: Settings = Depends(get_settings_dep)) -> dict[str, Any]:
-    """Who this token says you are — used to attribute comments in the UI."""
-    return {"name": actor(request), "protected": bool(parse_tokens(settings.workspace_tokens))}
+def me(identity: Identity = Depends(get_identity)) -> dict[str, Any]:
+    """The signed-in account — used to attribute comments and to render the account menu."""
+    return {
+        **identity.to_public(),
+        # Kept for the UI's existing call sites, which label activity with a name.
+        "name": identity.name,
+        "protected": True,
+    }
 
 
 @router.get("/usage")

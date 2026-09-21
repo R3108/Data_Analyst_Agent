@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
-from tests.conftest import REPORT, ScriptedLLM, make_plan
+from tests.conftest import REPORT, ScriptedLLM, make_plan, sign_in
 
 # Two segments with clearly different averages, spread across the whole date span so a
 # trailing comparison window contains both.
@@ -32,7 +32,7 @@ def llm() -> ScriptedLLM:
 @pytest.fixture
 def client(settings, llm):
     with TestClient(create_app(settings, llm=llm)) as test_client:
-        yield test_client
+        yield sign_in(test_client)
 
 
 @pytest.fixture
@@ -279,7 +279,7 @@ def test_health_advertises_the_new_capabilities(client):
     assert health["recall"]["enabled"] is True
     assert health["investigations"]["max_steps"] >= 1
     assert "sqlite" in health["sources"]["dialects"]
-    assert health["workspace"]["protected"] is False
+    assert health["workspace"] == {"protected": True, "isolation": "per-user database"}
 
 
 def test_sources_endpoint_lists_the_supported_dialects(client):

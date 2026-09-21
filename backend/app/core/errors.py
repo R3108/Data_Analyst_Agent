@@ -37,6 +37,37 @@ class NotFoundError(AppError):
     code = "not_found"
 
 
+class UnauthorizedError(AppError):
+    """Not signed in, or the session presented is no longer valid."""
+
+    status_code = 401
+    code = "unauthorized"
+
+
+class ForbiddenError(AppError):
+    """Signed in, but not allowed to do this. Distinct from 401: signing in again won't help."""
+
+    status_code = 403
+    code = "forbidden"
+
+
+class ConflictError(AppError):
+    status_code = 409
+    code = "conflict"
+
+
+class RateLimitedError(AppError):
+    """Too many attempts. Carries `retry_after_s` so the UI can say when to try again."""
+
+    status_code = 429
+    code = "rate_limited"
+
+    def __init__(self, message: str, *, retry_after_s: int = 60, **kwargs: Any) -> None:
+        details = {**kwargs.pop("details", {}), "retry_after_s": retry_after_s}
+        super().__init__(message, details=details, **kwargs)
+        self.retry_after_s = retry_after_s
+
+
 class InvalidInputError(AppError):
     status_code = 422
     code = "invalid_input"

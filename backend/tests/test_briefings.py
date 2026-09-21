@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from app.core.errors import InvalidInputError, NotFoundError
 from app.main import create_app
 from app.services.briefings import _is_due, _next_run
-from tests.conftest import REPORT, ScriptedLLM, make_plan
+from tests.conftest import REPORT, ScriptedLLM, make_plan, sign_in, workspace_of
 
 CODE = """
 kpi("Total revenue", df["Revenue"].sum(), format="currency")
@@ -53,7 +53,7 @@ def llm() -> ScriptedLLM:
 @pytest.fixture
 def client(settings, llm, transport):
     with TestClient(create_app(settings, llm=llm, transport=transport)) as test_client:
-        yield test_client
+        yield sign_in(test_client)
 
 
 @pytest.fixture
@@ -206,6 +206,7 @@ def test_delivery_can_be_suppressed_for_one_run(client, dataset_id, transport):
 def test_the_sweep_runs_only_what_is_due(settings, llm, transport):
     app = create_app(settings, llm=llm, transport=transport)
     with TestClient(app) as client:
+        sign_in(client)
         record = client.post("/api/datasets",
                              files={"file": ("sales.csv", CSV, "text/csv")}).json()
         due = client.post("/api/briefings", json={
@@ -215,11 +216,11 @@ def test_the_sweep_runs_only_what_is_due(settings, llm, transport):
             "dataset_id": record["id"], "question": "Paused?", "enabled": False,
         })
 
-        results = asyncio.run(app.state.briefings.run_due())
+        results = asyncio.run(workspace_of(app).briefings.run_due())
         assert [r["briefing"]["id"] for r in results] == [due["id"]]
 
         # Nothing is due immediately afterwards.
-        assert asyncio.run(app.state.briefings.run_due()) == []
+        assert asyncio.run(workspace_of(app).briefings.run_due()) == []
 
 
 def test_one_broken_briefing_does_not_stop_the_sweep(settings, transport):
@@ -233,24 +234,25 @@ def test_one_broken_briefing_does_not_stop_the_sweep(settings, transport):
     })
     app = create_app(settings, llm=failing, transport=transport)
     with TestClient(app) as client:
+        sign_in(client)
         record = client.post("/api/datasets",
                              files={"file": ("sales.csv", CSV, "text/csv")}).json()
         for question in ("First?", "Second?"):
             client.post("/api/briefings", json={"dataset_id": record["id"], "question": question})
 
-        results = asyncio.run(app.state.briefings.run_due())
+        results = asyncio.run(workspace_of(app).briefings.run_due())
         assert len(results) == 2
 
-        statuses = sorted(b["last_status"] for b in app.state.briefings.list())
+        statuses = sorted(b["last_status"] for b in workspace_of(app).briefings.list())
         # Both were attempted and both outcomes recorded — a failure is visible, not silent.
         assert statuses == ["error", "ok"]
-        failed = next(b for b in app.state.briefings.list() if b["last_status"] == "error")
+        failed = next(b for b in workspace_of(app).briefings.list() if b["last_status"] == "error")
         assert "rate limited" in failed["last_error"]
         assert transport.sent == []  # nothing is delivered for a failed run
 
 
 def test_service_errors_are_typed(client, dataset_id):
-    service = client.app.state.briefings
+    service = workspace_of(client).briefings
     with pytest.raises(NotFoundError):
         service.get("brf_missing")
     with pytest.raises(InvalidInputError, match="cadence"):

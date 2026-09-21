@@ -7,7 +7,14 @@ services:
       - path: .env
         required: false
     environment:
+      # The origin the browser app is served from. Checked on every state-changing
+      # request as well as by CORS, so it is a trust list rather than a convenience.
       CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      # Required in production; see .env.example for how to generate one. Compose
+      # reads it from your .env so it is never committed.
+      AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET in .env - generate with: python -c "import secrets; print(secrets.token_urlsafe(48))"}
+      # Accounts, sessions and every per-user database live under this volume.
+      DATA_DIR: /app/backend/data
     ports:
       - "8000:8000"
     volumes:
@@ -17,8 +24,11 @@ services:
   frontend:
     build:
       context: frontend
-      args:
-        NEXT_PUBLIC_API_URL: http://localhost:8000
+    environment:
+      # Server-side only: the browser never sees this and never talks to the backend
+      # directly. `/api/*` is rewritten here, which makes the session cookie
+      # first-party and removes cross-site cookie and CORS concerns entirely.
+      BACKEND_URL: http://backend:8000
     ports:
       - "3000:3000"
     depends_on:

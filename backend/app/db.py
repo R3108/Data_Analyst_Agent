@@ -246,6 +246,22 @@ MIGRATIONS: list[tuple[str, str, str]] = [
 ]
 SHAREABLE_TABLES = {"session": "sessions", "board": "boards"}
 
+# One write lock per database *file* rather than per `Database` object. Each account has
+# its own file, so per-user work runs in parallel; but a workspace evicted from the
+# in-memory cache and rebuilt on the next request yields a second `Database` pointed at
+# the same file, and those two must still serialise against each other.
+_FILE_LOCKS: dict[str, threading.RLock] = {}
+_FILE_LOCKS_GUARD = threading.Lock()
+
+
+def _lock_for(path: Path) -> threading.RLock:
+    key = str(Path(path).resolve())
+    with _FILE_LOCKS_GUARD:
+        lock = _FILE_LOCKS.get(key)
+        if lock is None:
+            lock = _FILE_LOCKS[key] = threading.RLock()
+        return lock
+
 
 def utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -259,7 +275,7 @@ class Database:
     def __init__(self, path: Path) -> None:
         self.path = path
         path.parent.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.RLock()
+        self._lock = _lock_for(path)
         with self.connect() as conn:
             conn.executescript(SCHEMA)
             self._migrate(conn)

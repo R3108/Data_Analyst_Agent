@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from app.main import create_app
 from app.services.notifications import Alert
-from tests.conftest import REPORT, ScriptedLLM, make_plan
+from tests.conftest import REPORT, ScriptedLLM, make_plan, sign_in
 
 CODE = 'kpi("Total revenue", df["Revenue"].sum(), format="currency")\n'
 
@@ -71,7 +71,7 @@ def llm() -> ScriptedLLM:
 @pytest.fixture
 def client(settings, llm, transport):
     with TestClient(create_app(settings, llm=llm, transport=transport)) as test_client:
-        yield test_client
+        yield sign_in(test_client)
 
 
 @pytest.fixture
@@ -338,6 +338,7 @@ def test_the_digest_explains_every_breach(client, breached):
 def test_root_cause_can_be_switched_off(settings, llm, transport):
     settings = settings.model_copy(update={"monitor_root_cause": False})
     with TestClient(create_app(settings, llm=llm, transport=transport)) as client:
+        sign_in(client)
         dataset = client.post(
             "/api/datasets",
             files={"file": ("collapse.csv", build_csv(collapse=True), "text/csv")},

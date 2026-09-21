@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
-from tests.conftest import REPORT, ScriptedLLM, make_plan
+from tests.conftest import REPORT, ScriptedLLM, make_plan, sign_in
 
 CODE = """
 by_region = df.groupby("Region", as_index=False)["Revenue"].sum()
@@ -40,7 +40,7 @@ def llm() -> ScriptedLLM:
 @pytest.fixture
 def client(settings, llm):
     with TestClient(create_app(settings, llm=llm)) as test_client:
-        yield test_client
+        yield sign_in(test_client)
 
 
 def test_full_chat_flow(client, llm, tiny_csv_bytes):
@@ -92,6 +92,7 @@ def test_llm_failure_is_streamed_as_error_and_persisted(settings, tiny_csv_bytes
 
     llm = ScriptedLLM({"plan": [LLMNotConfiguredError("No OpenAI credentials found.")]})
     with TestClient(create_app(settings, llm=llm)) as client:
+        sign_in(client)
         dataset = client.post("/api/datasets", files={"file": ("s.csv", tiny_csv_bytes, "text/csv")}).json()
         session = client.post("/api/sessions", json={"dataset_id": dataset["id"]}).json()
         with client.stream("POST", f"/api/sessions/{session['id']}/chat", json={"message": "hi"}) as r:

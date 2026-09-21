@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from app.main import create_app
 from app.services import semantics as semantics_lib
 from app.services.versions import diff_datasets
-from tests.conftest import REPORT, ScriptedLLM, make_plan
+from tests.conftest import REPORT, ScriptedLLM, make_plan, sign_in
 
 CODE = """
 by_region = df.groupby("Region", as_index=False)["Revenue"].sum()
@@ -37,7 +37,7 @@ def llm() -> ScriptedLLM:
 @pytest.fixture
 def client(settings, llm):
     with TestClient(create_app(settings, llm=llm)) as test_client:
-        yield test_client
+        yield sign_in(test_client)
 
 
 # ------------------------------------------------------------------ normalisation
