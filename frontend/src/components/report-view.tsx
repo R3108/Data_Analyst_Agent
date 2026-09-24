@@ -71,10 +71,13 @@ export function ReportView({ source, autoPrint = false, readOnlyBadge = true }: 
           <LogoMark className="size-7" />
           <span className="text-[15px] font-semibold tracking-tight text-ink">Numera</span>
           {readOnlyBadge && <Badge className="ml-1">Read-only</Badge>}
-          <Button className="ml-auto" size="sm" onClick={print} disabled={!doc}>
-            <Printer className="size-3.5" />
-            Print / Save PDF
-          </Button>
+          {!error && (
+            <Button className="ml-auto" size="sm" onClick={print} disabled={!doc}>
+              <Printer className="size-3.5" />
+              <span className="hidden sm:inline">Print / Save PDF</span>
+              <span className="sm:hidden">Print</span>
+            </Button>
+          )}
         </div>
       </header>
 
@@ -141,9 +144,11 @@ export function ReportView({ source, autoPrint = false, readOnlyBadge = true }: 
         )}
       </main>
 
-      <footer className="mx-auto max-w-6xl border-t border-line px-4 py-6 text-[12px] text-ink-3 sm:px-6">
-        Generated with Numera — every figure is computed by analysis code executed against the source data.
-      </footer>
+      {doc && (
+        <footer className="mx-auto max-w-6xl border-t border-line px-4 py-6 text-[12px] text-ink-3 sm:px-6">
+          Generated with Numera — every figure is computed by analysis code executed against the source data.
+        </footer>
+      )}
     </div>
   );
 }

@@ -26,6 +26,10 @@ const PRIVATE_PREFIXES = ["/admin", "/account"];
 // Sign-in screens, which a signed-in visitor should not be sitting on.
 const AUTH_ROUTES = ["/login", "/register"];
 
+// The marketing page. Kept in sync with `RequireSession`, which falls back to it when
+// this file cannot see the cookie.
+const LANDING_ROUTE = "/home";
+
 const SAME_ORIGIN_API = !process.env.NEXT_PUBLIC_API_URL;
 
 function hasSessionCookie(request: NextRequest): boolean {
@@ -39,6 +43,13 @@ export function proxy(request: NextRequest) {
 
   const { pathname, search } = request.nextUrl;
   const signedIn = hasSessionCookie(request);
+
+  // A signed-out visitor at the bare root sees the landing page, served under `/` so
+  // the address bar and search engines see the canonical URL. A root URL that carries a
+  // workspace query (`/?session=…`) is a deep link, so it goes on to the sign-in redirect.
+  if (!signedIn && pathname === "/" && !search) {
+    return NextResponse.rewrite(new URL(LANDING_ROUTE, request.url));
+  }
 
   if (!signedIn && PRIVATE_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
     const url = request.nextUrl.clone();

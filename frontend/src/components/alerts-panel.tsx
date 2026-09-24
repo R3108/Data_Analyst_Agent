@@ -14,11 +14,13 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
+import { useConfirm } from "@/components/ui/confirm";
 import { Badge, Button, IconButton, SectionLabel } from "@/components/ui/primitives";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, api } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { relativeTime } from "@/lib/format";
+import { useSession } from "@/lib/session";
 import type { AlertChannel, AlertEvent, AlertKind, AlertSettings } from "@/lib/types";
 
 const KINDS: Record<AlertKind, { label: string; icon: typeof Webhook; placeholder: string }> = {
@@ -54,6 +56,8 @@ function describe(error: unknown): string {
 /** Where breaches, recoveries and broken contracts are delivered. */
 export function AlertsPanel({ emailConfigured }: { emailConfigured?: boolean }) {
   const toast = useToast();
+  const confirm = useConfirm();
+  const { isAdmin } = useSession();
   const [settings, setSettings] = useState<AlertSettings | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -122,8 +126,14 @@ export function AlertsPanel({ emailConfigured }: { emailConfigured?: boolean }) 
       {!settings.enabled && (
         <p className="mt-3 flex items-start gap-2 rounded-lg bg-warn-soft px-3 py-2 text-[12.5px] text-ink">
           <TriangleAlert className="mt-px size-3.5 shrink-0 text-warn" />
-          Delivery is switched off on the server. Set <code className="font-mono">ALERTS_ENABLED=true</code>{" "}
-          and restart the backend.
+          {isAdmin ? (
+            <span>
+              Delivery is switched off on the server. Set <code className="font-mono">ALERTS_ENABLED=true</code>{" "}
+              and restart the backend.
+            </span>
+          ) : (
+            <span>Alert delivery is switched off for this workspace. Ask your administrator to turn it on.</span>
+          )}
         </p>
       )}
 
@@ -171,8 +181,13 @@ export function AlertsPanel({ emailConfigured }: { emailConfigured?: boolean }) 
                 toast.success(`Test alert sent to ${channel.name}`);
               }, `Test alert to ${channel.name} failed`)
             }
-            onRemove={() => {
-              if (!window.confirm(`Remove “${channel.name}”?`)) return;
+            onRemove={async () => {
+              const ok = await confirm({
+                title: `Remove “${channel.name}”?`,
+                body: "Alerts will no longer be delivered to this channel.",
+                confirmLabel: "Remove channel",
+              });
+              if (!ok) return;
               void guard(channel.id, async () => {
                 await api.deleteChannel(channel.id);
               }, "Couldn't remove the channel");
@@ -348,7 +363,7 @@ function NewChannelForm({
               type="button"
               onClick={() => setKind(option)}
               disabled={unavailable}
-              title={unavailable ? "Set SMTP_HOST in the backend .env to enable email" : undefined}
+              title={unavailable ? "Email delivery isn't configured on this server (SMTP_HOST)" : undefined}
               className={cn(
                 "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[13px] transition disabled:opacity-40",
                 kind === option ? "border-accent bg-accent-soft text-accent-ink" : "border-line text-ink-2 hover:bg-muted",

@@ -1,11 +1,12 @@
 "use client";
 
 import { ExternalLink, Globe, Link2, LockOpen, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button, CopyButton, IconButton } from "@/components/ui/primitives";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, api } from "@/lib/api";
+import { useFocusTrap } from "@/lib/focus-trap";
 
 export interface ShareTarget {
   kind: "session" | "board";
@@ -26,6 +27,8 @@ export function ShareDialog({
   const toast = useToast();
   const [token, setToken] = useState(target.token);
   const [busy, setBusy] = useState(false);
+  const panel = useRef<HTMLDivElement>(null);
+  useFocusTrap(panel);
   const url = token ? `${window.location.origin}/share/${token}` : null;
   const noun = target.kind === "session" ? "analysis" : "board";
 
@@ -58,14 +61,15 @@ export function ShareDialog({
 
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+      className="animate-fade fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
       onMouseDown={onClose}
     >
       <div
+        ref={panel}
         role="dialog"
         aria-modal="true"
         aria-label={`Share ${noun}`}
-        className="animate-rise w-full max-w-md rounded-2xl border border-line bg-panel p-5 shadow-pop"
+        className="animate-pop w-full max-w-md rounded-2xl border border-line bg-panel p-5 shadow-pop"
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="flex items-start gap-3">

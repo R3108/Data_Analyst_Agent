@@ -67,6 +67,13 @@ def test_registering_creates_an_account_and_signs_it_in(app_client):
     assert app_client.get("/api/auth/session").json()["user"]["id"] == user["id"]
 
 
+def test_signing_up_counts_as_the_first_sign_in(app_client):
+    # Otherwise the admin dashboard lists a brand-new, signed-in account as "never" seen.
+    user = register(app_client, "ada@example.com")["body"]["user"]
+    listed = next(u for u in app_client.get("/api/admin/users").json() if u["id"] == user["id"])
+    assert listed["last_login_at"] is not None
+
+
 def test_the_session_cookie_is_http_only_so_a_script_cannot_read_it(app_client):
     response = register(app_client, "ada@example.com")["response"]
     session_cookie = next(

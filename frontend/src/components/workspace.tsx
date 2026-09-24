@@ -21,6 +21,7 @@ import {
   Plus,
   Presentation,
   Printer,
+  RefreshCw,
   Search,
   Share2,
   ShieldAlert,
@@ -51,12 +52,14 @@ import { ShareDialog, type ShareTarget } from "@/components/share-dialog";
 import { Sidebar } from "@/components/sidebar";
 import { SignificanceView } from "@/components/significance-view";
 import { SourcesView } from "@/components/sources-view";
+import { useConfirm } from "@/components/ui/confirm";
 import { Button, IconButton } from "@/components/ui/primitives";
 import { useToast } from "@/components/ui/toast";
 import { WatchProvider } from "@/components/watch";
 import { Welcome } from "@/components/welcome";
 import { ApiError, api, streamChat, streamInvestigation } from "@/lib/api";
 import { cn } from "@/lib/cn";
+import { useModKey } from "@/lib/platform";
 import { useSession } from "@/lib/session";
 import { useTheme } from "@/lib/theme";
 import type {
@@ -143,6 +146,8 @@ const slugify = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, "-")
 
 export function Workspace() {
   const toast = useToast();
+  const confirm = useConfirm();
+  const mod = useModKey();
   const { setMode } = useTheme();
   // The signed-in account. `RequireSession` above has already guaranteed there is one;
   // every request below is authorised again by the server regardless.
@@ -283,12 +288,19 @@ export function Workspace() {
     [loadDataset, refreshLists, toast],
   );
 
-  useEffect(() => {
+  const checkHealth = useCallback(() => {
     api
       .health()
-      .then(setHealth)
+      .then((next) => {
+        setHealth(next);
+        setHealthError(null);
+        void refreshLists();
+      })
       .catch((error) => setHealthError(describe(error)));
-    void refreshLists();
+  }, [refreshLists]);
+
+  useEffect(() => {
+    checkHealth();
     const params = new URLSearchParams(window.location.search);
     const initialSession = params.get("session");
     const initialBoard = params.get("board");
@@ -480,8 +492,12 @@ export function Workspace() {
     [boards, openBoard, refreshLists, toast],
   );
 
-  const confirmDelete = async (message: string, action: () => Promise<void>, failure: string) => {
-    if (!window.confirm(message)) return;
+  const confirmDelete = async (
+    prompt: { title: string; body: string; confirmLabel: string },
+    action: () => Promise<void>,
+    failure: string,
+  ) => {
+    if (!(await confirm(prompt))) return;
     try {
       await action();
       void refreshLists();
@@ -490,24 +506,54 @@ export function Workspace() {
     }
   };
 
-  const deleteSession = (id: string) =>
-    confirmDelete("Delete this analysis? This cannot be undone.", async () => {
-      await api.deleteSession(id);
-      if (session?.id === id) newAnalysis();
-    }, "Couldn't delete analysis");
+  const deleteSession = (id: string) => {
+    const title = sessions.find((s) => s.id === id)?.title;
+    return confirmDelete(
+      {
+        title: title ? `Delete “${title}”?` : "Delete this analysis?",
+        body: "The conversation, its charts and any share link are removed. This cannot be undone.",
+        confirmLabel: "Delete analysis",
+      },
+      async () => {
+        await api.deleteSession(id);
+        if (session?.id === id) newAnalysis();
+      },
+      "Couldn't delete analysis",
+    );
+  };
 
-  const deleteBoard = (id: string) =>
-    confirmDelete("Delete this board? Pinned items will be removed.", async () => {
-      await api.deleteBoard(id);
-      if (boardId === id) newAnalysis();
-    }, "Couldn't delete board");
+  const deleteBoard = (id: string) => {
+    const title = boards.find((b) => b.id === id)?.title;
+    return confirmDelete(
+      {
+        title: title ? `Delete “${title}”?` : "Delete this board?",
+        body: "Everything pinned to it is removed and its share link stops working. This cannot be undone.",
+        confirmLabel: "Delete board",
+      },
+      async () => {
+        await api.deleteBoard(id);
+        if (boardId === id) newAnalysis();
+      },
+      "Couldn't delete board",
+    );
+  };
 
-  const deleteDataset = (id: string) =>
-    confirmDelete("Delete this dataset and every analysis that uses it?", async () => {
-      await api.deleteDataset(id);
-      datasetCache.current.delete(id);
-      if (session?.dataset_id === id) newAnalysis();
-    }, "Couldn't delete dataset");
+  const deleteDataset = (id: string) => {
+    const name = datasets.find((d) => d.id === id)?.name;
+    return confirmDelete(
+      {
+        title: name ? `Delete “${name}”?` : "Delete this dataset?",
+        body: "Every analysis that uses this dataset is deleted with it. This cannot be undone.",
+        confirmLabel: "Delete dataset",
+      },
+      async () => {
+        await api.deleteDataset(id);
+        datasetCache.current.delete(id);
+        if (session?.dataset_id === id) newAnalysis();
+      },
+      "Couldn't delete dataset",
+    );
+  };
 
   const exportMarkdown = async () => {
     if (!session) return;
@@ -761,7 +807,7 @@ export function Workspace() {
             <h1 className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">
               {headerTitle ?? <span className="text-ink-2">{boardId ? "Board" : "New analysis"}</span>}
             </h1>
-            <IconButton label="Search (Ctrl K)" onClick={() => setPaletteOpen(true)}>
+            <IconButton label={`Search (${mod} K)`} onClick={() => setPaletteOpen(true)}>
               <Search className="size-4" />
             </IconButton>
             {session && dataset && (
@@ -787,26 +833,62 @@ export function Workspace() {
             )}
           </header>
 
+          {/* Operator instructions (commands, env vars) are for administrators; everyone
+              else gets the plain-language version of the same problem. */}
           {healthError && (
-            <Banner tone="bad" icon={<CircleAlert className="size-4" />}>
-              {healthError} Start it with <code className="font-mono">uvicorn app.asgi:app --port 8000</code>.
+            <Banner
+              tone="bad"
+              icon={<CircleAlert className="size-4" />}
+              action={
+                <button
+                  onClick={checkHealth}
+                  className="inline-flex items-center gap-1 font-medium underline underline-offset-2"
+                >
+                  <RefreshCw className="size-3.5" />
+                  Retry
+                </button>
+              }
+            >
+              Numera can&apos;t reach its server right now, so nothing can be loaded or saved.
+              {isAdmin ? (
+                <>
+                  {" "}
+                  Check that the backend is running (
+                  <code className="font-mono">uvicorn app.asgi:app --port 8000</code>).
+                </>
+              ) : (
+                " Check your connection, or try again in a moment."
+              )}
             </Banner>
           )}
           {health && !health.llm_credentials_detected && (
             <Banner tone="warn" icon={<TriangleAlert className="size-4" />}>
-              No OpenAI API key detected. Add <code className="font-mono">OPENAI_API_KEY</code> to your{" "}
-              <code className="font-mono">.env</code> and restart the backend to enable analysis.
+              AI analysis is unavailable because no model API key is configured.
+              {isAdmin ? (
+                <>
+                  {" "}
+                  Add <code className="font-mono">OPENAI_API_KEY</code> to the backend{" "}
+                  <code className="font-mono">.env</code> and restart it.
+                </>
+              ) : (
+                " Ask your administrator to finish setting up Numera. Drivers, forecasts and the other tools still work."
+              )}
             </Banner>
           )}
           {usage?.budget.exhausted && (
             <Banner tone="bad" icon={<CircleAlert className="size-4" />}>
-              Your ${usage.budget.limit_usd?.toFixed(2)} monthly AI budget is used. New analyses are paused until{" "}
+              The ${usage.budget.limit_usd?.toFixed(2)} monthly AI budget is used up. New analyses are paused until{" "}
               {new Date(`${usage.budget.reset_at}T00:00:00`).toLocaleDateString(undefined, {
                 month: "short",
                 day: "numeric",
               })}
-              {", or raise "}
-              <code className="font-mono">AI_MONTHLY_BUDGET_USD</code> and restart the backend.
+              {isAdmin ? (
+                <>
+                  , or raise <code className="font-mono">AI_MONTHLY_BUDGET_USD</code> and restart the backend.
+                </>
+              ) : (
+                ". Your administrator can raise the limit sooner."
+              )}
             </Banner>
           )}
           {dataset && (dataset.privacy_scan?.counts.high ?? 0) > 0 && !dataset.privacy?.applied_at && (
@@ -987,17 +1069,28 @@ function DatasetView({
   return <DriversView {...shared} initialQuery={query} />;
 }
 
-function Banner({ tone, icon, children }: { tone: "bad" | "warn"; icon: React.ReactNode; children: React.ReactNode }) {
+function Banner({
+  tone,
+  icon,
+  action,
+  children,
+}: {
+  tone: "bad" | "warn";
+  icon: React.ReactNode;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <div
       role="status"
       className={cn(
-        "flex shrink-0 items-start gap-2.5 border-b border-line px-4 py-2.5 text-[13px] leading-snug",
+        "no-print flex shrink-0 items-start gap-2.5 border-b border-line px-4 py-2.5 text-[13px] leading-snug",
         tone === "bad" ? "bg-bad-soft text-bad" : "bg-warn-soft text-warn",
       )}
     >
       <span className="mt-px shrink-0">{icon}</span>
-      <p className="text-ink">{children}</p>
+      <p className="min-w-0 flex-1 text-ink">{children}</p>
+      {action && <span className="shrink-0 text-ink">{action}</span>}
     </div>
   );
 }

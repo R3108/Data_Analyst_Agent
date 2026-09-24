@@ -4,6 +4,7 @@ import { CornerDownLeft, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { cn } from "@/lib/cn";
+import { useFocusTrap } from "@/lib/focus-trap";
 
 export interface PaletteCommand {
   id: string;
@@ -28,6 +29,8 @@ export function CommandPalette({
   const [active, setActive] = useState(0);
   const input = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  useFocusTrap(panel, open);
 
   useEffect(() => {
     if (!open) return;
@@ -70,14 +73,15 @@ export function CommandPalette({
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-start justify-center bg-black/40 p-4 pt-[12vh] backdrop-blur-sm"
+      className="animate-fade fixed inset-0 z-[80] flex items-start justify-center bg-black/40 p-4 pt-[12vh] backdrop-blur-sm"
       onMouseDown={onClose}
     >
       <div
+        ref={panel}
         role="dialog"
         aria-modal="true"
         aria-label="Command palette"
-        className="animate-rise w-full max-w-xl overflow-hidden rounded-2xl border border-line bg-panel shadow-pop"
+        className="animate-pop w-full max-w-xl overflow-hidden rounded-2xl border border-line bg-panel shadow-pop"
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="flex items-center gap-3 border-b border-line px-4">

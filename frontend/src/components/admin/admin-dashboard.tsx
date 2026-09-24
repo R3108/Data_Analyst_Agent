@@ -20,10 +20,11 @@ import {
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { useConfirm } from "@/components/ui/confirm";
 import { Badge, Button, EmptyState, TextInput } from "@/components/ui/primitives";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, admin } from "@/lib/api";
-import { relativeTime } from "@/lib/format";
+import { plural, relativeTime } from "@/lib/format";
 import { cn } from "@/lib/cn";
 import { useSession } from "@/lib/session";
 import type { AdminOverview, AdminUser, AuditEvent, Role } from "@/lib/types";
@@ -173,13 +174,13 @@ function StatRow({ overview }: { overview: AdminOverview | null }) {
     {
       label: "Accounts",
       value: overview ? String(overview.users.total) : "—",
-      hint: overview ? `${overview.users.admins} admin · ${overview.users.suspended} suspended` : "",
+      hint: overview ? `${plural(overview.users.admins, "admin")} · ${overview.users.suspended} suspended` : "",
       icon: <Users className="size-4" />,
     },
     {
       label: "Signed in now",
       value: overview ? String(overview.sessions.signed_in_users) : "—",
-      hint: overview ? `${overview.sessions.active} active sessions` : "",
+      hint: overview ? plural(overview.sessions.active, "active session") : "",
       icon: <UserCheck className="size-4" />,
     },
     {
@@ -223,36 +224,39 @@ function UserTable({
   onChanged: () => Promise<void>;
 }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [resetting, setResetting] = useState<AdminUser | null>(null);
 
+  /** Runs an action against one account; resolves to whether it succeeded. */
   const act = async (id: string, run: () => Promise<unknown>, failure: string) => {
     setBusyId(id);
     try {
       await run();
       await onChanged();
+      return true;
     } catch (error) {
       toast.error(failure, describe(error));
+      return false;
     } finally {
       setBusyId(null);
     }
   };
 
   const remove = async (account: AdminUser) => {
-    const typed = window.prompt(
-      `This permanently deletes ${account.email} and every dataset, analysis and board in their workspace.\n\nType the email address to confirm:`,
-    );
-    if (typed === null) return;
-    if (typed.trim().toLowerCase() !== account.email) {
-      toast.error("Not deleted", "The address you typed did not match.");
-      return;
-    }
-    await act(
+    const ok = await confirm({
+      title: `Delete ${account.name || account.email}?`,
+      body: "This permanently deletes the account and every dataset, analysis and board in its workspace. It cannot be undone.",
+      confirmLabel: "Delete account",
+      requireText: account.email,
+    });
+    if (!ok) return;
+    const deleted = await act(
       account.id,
       () => admin.deleteUser(account.id, account.email),
       "Couldn't delete the account",
     );
-    toast.success("Account deleted", `${account.email} and their workspace have been erased.`);
+    if (deleted) toast.success("Account deleted", `${account.email} and their workspace have been erased.`);
   };
 
   if (users === null) {
@@ -309,10 +313,11 @@ function UserTable({
                   </div>
                 </td>
                 <td className="hidden px-4 py-3 text-ink-2 sm:table-cell">
-                  <span className="tabular-nums">{account.usage.datasets}</span> datasets ·{" "}
+                  <span className="tabular-nums">{plural(account.usage.datasets, "dataset")}</span> ·{" "}
                   <span className="tabular-nums">{bytes(account.usage.storage_bytes)}</span>
                   <p className="text-[11.5px] text-ink-3">
-                    {account.usage.sessions} analyses · {account.usage.boards} boards
+                    {plural(account.usage.sessions, "analysis", "analyses")} ·{" "}
+                    {plural(account.usage.boards, "board")}
                   </p>
                 </td>
                 <td className="hidden px-4 py-3 text-ink-2 md:table-cell">

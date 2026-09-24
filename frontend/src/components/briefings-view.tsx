@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
+import { useConfirm } from "@/components/ui/confirm";
 import {
   Badge,
   Button,
@@ -59,6 +60,7 @@ export function BriefingsView({
   onOpenSession: (sessionId: string) => void;
 }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const [briefings, setBriefings] = useState<Briefing[]>([]);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState<string | null>(null);
@@ -106,7 +108,12 @@ export function BriefingsView({
   };
 
   const remove = async (briefing: Briefing) => {
-    if (!window.confirm(`Delete the briefing “${briefing.title}”?`)) return;
+    const ok = await confirm({
+      title: `Delete the briefing “${briefing.title}”?`,
+      body: "It stops running on its schedule. Analyses it already produced are kept.",
+      confirmLabel: "Delete briefing",
+    });
+    if (!ok) return;
     try {
       await api.deleteBriefing(briefing.id);
       await refresh();

@@ -134,7 +134,9 @@ export function RequireSession({
   useEffect(() => {
     if (status !== "anonymous") return;
     const here = window.location.pathname + window.location.search;
-    router.replace(`/login${here === "/" ? "" : `?next=${encodeURIComponent(here)}`}`);
+    // The bare root is somebody arriving, not somebody returning to a deep link: show
+    // them the landing page. `proxy.ts` normally does this before the page ever loads.
+    router.replace(here === "/" ? "/home" : `/login?next=${encodeURIComponent(here)}`);
   }, [status, router]);
 
   if (status === "loading") return <>{fallback ?? <SessionSkeleton />}</>;

@@ -35,6 +35,7 @@ import { Wordmark } from "@/components/brand";
 import { Button, IconButton } from "@/components/ui/primitives";
 import { cn } from "@/lib/cn";
 import { formatCost, modelLabel, relativeTime } from "@/lib/format";
+import { useModKey } from "@/lib/platform";
 import { useTheme, type ThemeMode } from "@/lib/theme";
 import type {
   BoardSummary,
@@ -159,6 +160,7 @@ export function Sidebar({
 }) {
   const breaches = monitorDigest?.counts.breached ?? 0;
   const [showActivity, setShowActivity] = useState(false);
+  const mod = useModKey();
 
   // On small screens the sidebar is a drawer; Escape dismisses it like the backdrop does.
   useEffect(() => {
@@ -170,7 +172,9 @@ export function Sidebar({
 
   return (
     <>
-      {open && <div className="fixed inset-0 z-30 bg-black/30 lg:hidden" onClick={onClose} aria-hidden="true" />}
+      {open && (
+        <div className="animate-fade fixed inset-0 z-30 bg-black/30 lg:hidden" onClick={onClose} aria-hidden="true" />
+      )}
       <aside
         className={cn(
           "no-print fixed inset-y-0 left-0 z-40 flex w-[272px] shrink-0 flex-col border-r border-line bg-panel transition-transform duration-200 lg:static lg:translate-x-0",
@@ -195,7 +199,7 @@ export function Sidebar({
           >
             <Search className="size-3.5" />
             <span className="flex-1 text-left">Search</span>
-            <kbd className="rounded border border-line px-1.5 text-[10px]">Ctrl K</kbd>
+            <kbd className="rounded border border-line px-1.5 text-[10px]">{mod} K</kbd>
           </button>
         </div>
 

@@ -74,7 +74,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
             <div
               key={toast.id}
               role={toast.tone === "error" ? "alert" : "status"}
-              className="animate-rise pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-xl border border-line bg-panel p-3.5 shadow-pop"
+              className="animate-slide-in pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-xl border border-line bg-panel p-3.5 shadow-pop"
             >
               <Icon className={cn("mt-0.5 size-4 shrink-0", TONE_CLASS[toast.tone])} />
               <div className="min-w-0 flex-1">

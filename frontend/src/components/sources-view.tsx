@@ -13,6 +13,7 @@ import {
 import { useCallback, useEffect, useState } from "react";
 
 import { DataTable } from "@/components/chat/data-table";
+import { useConfirm } from "@/components/ui/confirm";
 import {
   Badge,
   Button,
@@ -55,6 +56,7 @@ function describe(error: unknown): string {
  */
 export function SourcesView({ onOpenDataset }: { onOpenDataset: (datasetId: string) => void }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const [sources, setSources] = useState<Source[]>([]);
   const [dialects, setDialects] = useState<Dialect[]>([]);
   const [loading, setLoading] = useState(true);
@@ -96,9 +98,12 @@ export function SourcesView({ onOpenDataset }: { onOpenDataset: (datasetId: stri
   };
 
   const remove = async (source: Source) => {
-    if (!window.confirm(`Delete the connection “${source.name}”? Datasets it created are kept.`)) {
-      return;
-    }
+    const ok = await confirm({
+      title: `Delete the connection “${source.name}”?`,
+      body: "Scheduled refreshes stop. Datasets it already created are kept.",
+      confirmLabel: "Delete connection",
+    });
+    if (!ok) return;
     try {
       await api.deleteSource(source.id);
       await refresh();

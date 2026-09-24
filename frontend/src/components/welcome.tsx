@@ -187,18 +187,9 @@ export function Welcome({
           )}
         </div>
 
-        <div className="animate-rise mt-10 grid gap-4 sm:grid-cols-3" style={{ animationDelay: "120ms" }}>
-          {FEATURES.map(({ icon: Icon, title, body }) => (
-            <div key={title} className="rounded-xl border border-line bg-panel/60 p-4">
-              <Icon className="size-5 text-accent" />
-              <p className="mt-3 text-sm font-semibold text-ink">{title}</p>
-              <p className="mt-1 text-[13px] leading-relaxed text-ink-2">{body}</p>
-            </div>
-          ))}
-        </div>
-
+        {/* Returning users come back for their data, so it sits above the feature tour. */}
         {datasets.length > 0 && (
-          <div className="animate-rise mt-10" style={{ animationDelay: "180ms" }}>
+          <div className="animate-rise mt-10" style={{ animationDelay: "120ms" }}>
             <p className="mb-3 text-xs font-medium tracking-wide text-ink-3 uppercase">Continue with a dataset</p>
             <div className="grid gap-2 sm:grid-cols-2">
               {datasets.slice(0, 6).map((dataset) => (
@@ -222,6 +213,19 @@ export function Welcome({
             </div>
           </div>
         )}
+
+        <p className="animate-rise mt-12 mb-3 text-xs font-medium tracking-wide text-ink-3 uppercase" style={{ animationDelay: "180ms" }}>
+          What Numera does
+        </p>
+        <div className="animate-rise grid gap-4 sm:grid-cols-2 lg:grid-cols-3" style={{ animationDelay: "180ms" }}>
+          {FEATURES.map(({ icon: Icon, title, body }) => (
+            <div key={title} className="rounded-xl border border-line bg-panel/60 p-4">
+              <Icon className="size-5 text-accent" />
+              <p className="mt-3 text-sm font-semibold text-ink">{title}</p>
+              <p className="mt-1 text-[13px] leading-relaxed text-ink-2">{body}</p>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

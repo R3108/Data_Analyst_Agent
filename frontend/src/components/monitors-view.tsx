@@ -17,7 +17,8 @@ import { useCallback, useEffect, useState } from "react";
 
 import { AlertsPanel } from "@/components/alerts-panel";
 import { Sparkline } from "@/components/chat/sparkline";
-import { Badge, Button, IconButton, SectionLabel } from "@/components/ui/primitives";
+import { useConfirm } from "@/components/ui/confirm";
+import { Badge, Button, EmptyState, IconButton, SectionLabel } from "@/components/ui/primitives";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, api } from "@/lib/api";
 import { cn } from "@/lib/cn";
@@ -45,6 +46,7 @@ export function MonitorsView({
   emailConfigured?: boolean;
 }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const [digest, setDigest] = useState<MonitorDigest | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -98,14 +100,38 @@ export function MonitorsView({
       await api.updateMonitor(monitor.id, { enabled: !monitor.enabled });
     }, "Couldn't update this monitor");
 
-  const remove = (monitor: Monitor) => {
-    if (!window.confirm(`Stop watching “${monitor.title}”?`)) return;
+  const remove = async (monitor: Monitor) => {
+    const ok = await confirm({
+      title: `Stop watching “${monitor.title}”?`,
+      body: "Its check history is deleted and no further alerts are sent for it.",
+      confirmLabel: "Remove monitor",
+    });
+    if (!ok) return;
     void guard(monitor.id, async () => {
       await api.deleteMonitor(monitor.id);
     }, "Couldn't remove this monitor");
   };
 
-  if (error) return <p className="mx-auto max-w-5xl px-6 pt-10 text-sm text-bad">{error}</p>;
+  if (error) {
+    return (
+      <EmptyState
+        icon={<TriangleAlert className="size-5" />}
+        title="Monitors couldn't be loaded"
+        body={error}
+        action={
+          <Button
+            onClick={() => {
+              setError(null);
+              void load();
+            }}
+          >
+            <RefreshCw className="size-3.5" />
+            Try again
+          </Button>
+        }
+      />
+    );
+  }
   if (!digest) {
     return (
       <div className="mx-auto w-full max-w-4xl space-y-4 px-6 pt-10">
@@ -195,7 +221,7 @@ export function MonitorsView({
                     disabled={busy !== null}
                     onRun={() => void runOne(monitor)}
                     onToggle={() => void toggle(monitor)}
-                    onRemove={() => remove(monitor)}
+                    onRemove={() => void remove(monitor)}
                     onOpenSession={onOpenSession}
                     onExplain={onExplain}
                   />

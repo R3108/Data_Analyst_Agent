@@ -164,6 +164,10 @@ class AuthService:
         )
         if first_user:
             self._announce_first_account(user["id"])
+        # Signing up signs the account in, so it counts as its first sign-in. (An account
+        # an admin creates keeps `last_login_at` empty until its owner actually signs in.)
+        self.store.update_user(user["id"], last_login_at=stamp())
+        user = self.store.get_user(user["id"]) or user
         return self._open_session(user, meta)
 
     def create_account(self, *, email: str, password: str, name: str, role: str = "user",

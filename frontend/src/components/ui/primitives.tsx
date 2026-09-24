@@ -5,7 +5,7 @@ import { forwardRef, useState } from "react";
 
 import { cn } from "@/lib/cn";
 
-type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
+type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "destructive";
 type ButtonSize = "sm" | "md" | "lg";
 
 const VARIANTS: Record<ButtonVariant, string> = {
@@ -13,6 +13,8 @@ const VARIANTS: Record<ButtonVariant, string> = {
   secondary: "bg-panel text-ink border border-line hover:bg-muted shadow-card",
   ghost: "text-ink-2 hover:bg-muted hover:text-ink",
   danger: "text-bad hover:bg-bad-soft",
+  // The filled counterpart of `danger`, for the one button that commits a destructive act.
+  destructive: "bg-bad text-white hover:brightness-110 shadow-card",
 };
 const SIZES: Record<ButtonSize, string> = {
   sm: "h-8 px-2.5 text-[13px] gap-1.5 rounded-lg",
@@ -35,7 +37,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       ref={ref}
       disabled={disabled || loading}
       className={cn(
-        "inline-flex shrink-0 items-center justify-center font-medium whitespace-nowrap transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+        // A slight press on click makes every button feel physical; disabled ones stay put.
+        "inline-flex shrink-0 items-center justify-center font-medium whitespace-nowrap transition-[color,background-color,border-color,box-shadow,scale,filter] duration-150 enabled:active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50",
         VARIANTS[variant],
         SIZES[size],
         className,
@@ -66,7 +69,7 @@ export function IconButton({
       aria-label={label}
       title={label}
       className={cn(
-        "inline-flex shrink-0 items-center justify-center rounded-lg text-ink-2 transition-colors hover:bg-muted hover:text-ink disabled:opacity-40",
+        "inline-flex shrink-0 items-center justify-center rounded-lg text-ink-2 transition-[color,background-color,scale] duration-150 hover:bg-muted hover:text-ink enabled:active:scale-90 disabled:opacity-40",
         ICON_SIZES[size],
         className,
       )}

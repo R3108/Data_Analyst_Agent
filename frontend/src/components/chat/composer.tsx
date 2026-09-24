@@ -4,6 +4,7 @@ import { ArrowUp, Mic, ShieldCheck, Square } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 
 import { cn } from "@/lib/cn";
+import { useModKey } from "@/lib/platform";
 
 export interface ComposerHandle {
   focus: () => void;
@@ -34,6 +35,7 @@ export const Composer = forwardRef<
   ComposerHandle,
   { onSend: (text: string) => void; onStop: () => void; streaming: boolean; placeholder: string; disabled?: boolean }
 >(function Composer({ onSend, onStop, streaming, placeholder, disabled = false }, ref) {
+  const mod = useModKey();
   const [value, setValue] = useState("");
   const [voiceSupported, setVoiceSupported] = useState(false);
   const [listening, setListening] = useState(false);
@@ -158,7 +160,7 @@ export const Composer = forwardRef<
       {/* Both hints stay on one line: the keyboard hint drops first when space is tight. */}
       <div className="mt-2 flex items-center justify-between gap-4 px-1 text-[11px] text-ink-3">
         <span className="hidden whitespace-nowrap lg:inline">
-          Enter to send · Shift + Enter for a new line · ⌘K to search
+          Enter to send · Shift + Enter for a new line · {mod === "⌘" ? "⌘K" : "Ctrl K"} to search
         </span>
         <span className="flex shrink-0 items-center gap-1 whitespace-nowrap">
           <ShieldCheck className="size-3" />

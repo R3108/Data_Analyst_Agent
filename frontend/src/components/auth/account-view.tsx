@@ -14,6 +14,7 @@ import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { FormMessage, GoogleMark, PasswordField, StrengthMeter } from "@/components/auth/auth-shell";
+import { useConfirm } from "@/components/ui/confirm";
 import { Badge, Button, TextInput } from "@/components/ui/primitives";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, auth, googleErrorMessage } from "@/lib/api";
@@ -154,6 +155,7 @@ function ProfileCard({ onSaved }: { onSaved: () => Promise<unknown> }) {
 
 function SignInMethodsCard() {
   const toast = useToast();
+  const confirm = useConfirm();
   const params = useSearchParams();
   const [methods, setMethods] = useState<SignInMethods | null>(null);
   const [busy, setBusy] = useState(false);
@@ -178,7 +180,12 @@ function SignInMethodsCard() {
   if (!methods || (!methods.google_available && !methods.google)) return null;
 
   const disconnect = async () => {
-    if (!window.confirm("Disconnect Google? You will sign in with your password instead.")) return;
+    const ok = await confirm({
+      title: "Disconnect Google?",
+      body: "You will sign in with your email and password instead. You can reconnect it at any time.",
+      confirmLabel: "Disconnect",
+    });
+    if (!ok) return;
     setBusy(true);
     try {
       setMethods(await auth.disconnectGoogle());
@@ -336,6 +343,7 @@ function PasswordCard({ minLength, hasPassword }: { minLength: number; hasPasswo
 
 function DevicesCard({ onSignOutEverywhere }: { onSignOutEverywhere: () => Promise<void> }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const [sessions, setSessions] = useState<AuthSession[] | null>(null);
 
   const load = useCallback(() => {
@@ -391,10 +399,13 @@ function DevicesCard({ onSignOutEverywhere }: { onSignOutEverywhere: () => Promi
         <Button
           size="sm"
           variant="danger"
-          onClick={() => {
-            if (window.confirm("Sign out of every device, including this one?")) {
-              void auth.revokeAllSessions().finally(() => void onSignOutEverywhere());
-            }
+          onClick={async () => {
+            const ok = await confirm({
+              title: "Sign out of every device?",
+              body: "Every browser signed in to this account — including this one — will need to sign in again.",
+              confirmLabel: "Sign out everywhere",
+            });
+            if (ok) void auth.revokeAllSessions().finally(() => void onSignOutEverywhere());
           }}
         >
           <ShieldCheck className="size-3.5" />

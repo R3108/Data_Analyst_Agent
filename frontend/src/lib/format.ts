@@ -25,6 +25,21 @@ export function formatValue(value: unknown, format: KpiFormat = "auto"): string 
   }
 }
 
+/**
+ * A signed difference, formatted at the same scale as the totals it sits beside: a 69.6K
+ * move between 1.5M and 1.6M reads as "+69.6K", not "+69,601.47".
+ */
+export function formatChange(change: number, reference: number): string {
+  const sign = change > 0 ? "+" : change < 0 ? "−" : "";
+  const magnitude = Math.abs(change);
+  return sign + (Math.abs(reference) >= 100_000 ? compact.format(magnitude) : formatValue(magnitude));
+}
+
+/** "1 dataset", "3 datasets", "1 analysis", "2 analyses". */
+export function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
+  return `${count.toLocaleString()} ${count === 1 ? singular : pluralForm}`;
+}
+
 export function formatDelta(delta: number): string {
   const pct = delta * 100;
   const sign = pct > 0 ? "+" : pct < 0 ? "−" : "";

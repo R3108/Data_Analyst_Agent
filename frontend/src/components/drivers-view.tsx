@@ -27,7 +27,7 @@ import {
 import { useToast } from "@/components/ui/toast";
 import { ApiError, api } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { formatValue } from "@/lib/format";
+import { formatChange, formatValue } from "@/lib/format";
 import type {
   Aggregation,
   DatasetSummary,
@@ -233,8 +233,7 @@ export function DriversView({
                       total.direction === "up" ? "text-good" : total.direction === "down" ? "text-bad" : "text-ink",
                     )}
                   >
-                    {total.change > 0 ? "+" : ""}
-                    {formatValue(total.change)}
+                    {formatChange(total.change, Math.max(Math.abs(total.baseline), Math.abs(total.current)))}
                     {total.change_pct !== null && (
                       <span className="ml-1.5 text-base font-medium">
                         ({total.change_pct > 0 ? "+" : "−"}

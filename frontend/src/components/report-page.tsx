@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { ReportView, type ReportSource } from "@/components/report-view";
+import { StatusPage, primaryLinkClass } from "@/components/status-page";
 
 /** `/report?session=<id>` or `/report?board=<id>`, optionally `&print=1` to open the print dialog. */
 export function ReportPage() {
@@ -20,7 +21,18 @@ export function ReportPage() {
 
   if (!state) return null;
   if (!state.source) {
-    return <p className="p-10 text-center text-sm text-ink-2">Nothing to show — open a report from an analysis or board.</p>;
+    return (
+      <StatusPage
+        code="Report"
+        title="Nothing to show yet"
+        body="Open a report from an analysis or a board using Export → Print view."
+        actions={
+          <a href="/" className={primaryLinkClass}>
+            Back to the workspace
+          </a>
+        }
+      />
+    );
   }
   return <ReportView source={state.source} autoPrint={state.print} readOnlyBadge={false} />;
 }

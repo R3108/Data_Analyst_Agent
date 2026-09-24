@@ -3,6 +3,7 @@ import { Suspense } from "react";
 
 import { SessionProvider } from "@/lib/session";
 import { ThemeProvider, themeBootScript } from "@/lib/theme";
+import { ConfirmProvider } from "@/components/ui/confirm";
 import { ToastProvider } from "@/components/ui/toast";
 
 import "./globals.css";
@@ -29,11 +30,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <ThemeProvider>
           <ToastProvider>
-            {/* The provider reads the current route so it can send an expired session
-                back to the page it was on. */}
-            <Suspense>
-              <SessionProvider>{children}</SessionProvider>
-            </Suspense>
+            <ConfirmProvider>
+              {/* The provider reads the current route so it can send an expired session
+                  back to the page it was on. */}
+              <Suspense>
+                <SessionProvider>{children}</SessionProvider>
+              </Suspense>
+            </ConfirmProvider>
           </ToastProvider>
         </ThemeProvider>
       </body>

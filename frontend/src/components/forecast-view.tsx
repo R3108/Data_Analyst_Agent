@@ -26,7 +26,7 @@ import {
 import { useToast } from "@/components/ui/toast";
 import { ApiError, api } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { formatValue } from "@/lib/format";
+import { formatChange, formatValue } from "@/lib/format";
 import type {
   Aggregation,
   DatasetSummary,
@@ -262,8 +262,7 @@ export function ForecastView({
                           : "text-ink",
                     )}
                   >
-                    {totals.change > 0 ? "+" : ""}
-                    {formatValue(totals.change)}
+                    {formatChange(totals.change, Math.max(Math.abs(totals.recent), Math.abs(totals.projected)))}
                     {totals.change_pct !== null && (
                       <span className="ml-1.5 text-base font-medium">
                         ({totals.change_pct > 0 ? "+" : "−"}

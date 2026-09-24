@@ -1,6 +1,7 @@
 "use client";
 
 import { CircleAlert, CircleCheck, Eye, EyeOff, LoaderCircle } from "lucide-react";
+import Link from "next/link";
 import { forwardRef, useEffect, useId, useState } from "react";
 
 import { LogoMark } from "@/components/brand";
@@ -22,7 +23,9 @@ export function AuthShell({
     <main className="flex min-h-dvh items-center justify-center bg-canvas px-6 py-10">
       <div className="w-full max-w-sm">
         <div className="rounded-2xl border border-line bg-panel p-6 shadow-pop">
-          <LogoMark className="size-9" />
+          <Link href="/home" aria-label="Numera home" className="inline-block rounded-lg">
+            <LogoMark className="size-9" />
+          </Link>
           <h1 className="mt-4 text-[19px] font-semibold tracking-tight text-ink">{title}</h1>
           {subtitle && (
             <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-2">{subtitle}</p>

@@ -26,6 +26,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { DataTable } from "@/components/chat/data-table";
+import { useConfirm } from "@/components/ui/confirm";
 import { Badge, Button, IconButton, SectionLabel } from "@/components/ui/primitives";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, api } from "@/lib/api";
@@ -102,8 +103,9 @@ export function DataPanel({
 }) {
   return (
     <>
-      <div className="fixed inset-0 z-30 bg-black/30 xl:hidden" onClick={onClose} aria-hidden="true" />
-      <aside className="fixed inset-y-0 right-0 z-40 flex w-full max-w-[400px] flex-col border-l border-line bg-panel shadow-pop xl:static xl:z-auto xl:w-[400px] xl:max-w-none xl:shadow-none">
+      <div className="animate-fade fixed inset-0 z-30 bg-black/30 xl:hidden" onClick={onClose} aria-hidden="true" />
+      {/* A drawer that slides in on narrow screens; docked and still on wide ones. */}
+      <aside className="animate-drawer fixed inset-y-0 right-0 z-40 flex w-full max-w-[400px] flex-col border-l border-line bg-panel shadow-pop xl:static xl:z-auto xl:w-[400px] xl:max-w-none xl:shadow-none">
         <div className="flex h-14 shrink-0 items-center gap-3 border-b border-line px-4">
           <div className="min-w-0 flex-1">
             <p className="flex items-center gap-1.5 truncate text-sm font-semibold text-ink">
@@ -347,6 +349,7 @@ const ACTION_HINT: Record<PrivacyAction, string> = {
  */
 function Privacy({ dataset, onApplied }: { dataset: Dataset; onApplied?: () => void }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const [report, setReport] = useState<PrivacyReport | null>(null);
   const [draft, setDraft] = useState<Record<string, PrivacyAction>>({});
   const [loading, setLoading] = useState(true);
@@ -556,23 +559,29 @@ function Privacy({ dataset, onApplied }: { dataset: Dataset; onApplied?: () => v
               variant="primary"
               loading={busy === "apply"}
               disabled={busy !== null || (!planned.length && !state.policy)}
-              onClick={() => {
-                const columns = planned.length
-                  ? planned.map(([column, action]) => `${column} → ${action}`)
-                  : Object.entries(state.policy).map(([c, a]) => `${c} → ${a}`);
+              onClick={async () => {
+                const columns = planned.length ? planned : Object.entries(state.policy);
                 if (!columns.length) {
                   toast.error("Nothing to redact", "Choose mask, hash or drop for a column first.");
                   return;
                 }
-                if (
-                  !window.confirm(
-                    `Rewrite this table permanently?\n\n${columns.join(
-                      "\n",
-                    )}\n\nThe original upload is deleted too, and this cannot be undone.`,
-                  )
-                ) {
-                  return;
-                }
+                const ok = await confirm({
+                  title: "Rewrite this table permanently?",
+                  body: (
+                    <>
+                      <ul className="my-2 space-y-0.5 rounded-lg bg-muted px-3 py-2 font-mono text-[12px] text-ink">
+                        {columns.map(([column, action]) => (
+                          <li key={column} className="truncate">
+                            {column} → {action}
+                          </li>
+                        ))}
+                      </ul>
+                      The original upload is deleted too, and this cannot be undone.
+                    </>
+                  ),
+                  confirmLabel: "Redact table",
+                });
+                if (!ok) return;
                 void act(
                   "apply",
                   async () => {
