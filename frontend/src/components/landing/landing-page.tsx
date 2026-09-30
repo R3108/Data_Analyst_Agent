@@ -33,18 +33,23 @@ import {
 import Link from "next/link";
 
 import { LogoMark, Wordmark } from "@/components/brand";
-import { LandingNav, PrimaryCta } from "@/components/landing/landing-nav";
+import { AnswerExplorer } from "@/components/landing/answer-explorer";
 import { BarField3D } from "@/components/landing/bar-field-3d";
-import { CountUp, RevealObserver, Tilt } from "@/components/landing/motion";
+import { BackToTop, CopyCommand, Replay } from "@/components/landing/interactive";
+import { DataJourney } from "@/components/landing/data-journey";
+import { FloatingCubes } from "@/components/landing/floating-cubes";
+import { LandingNav, PrimaryCta, StickyCta } from "@/components/landing/landing-nav";
+import { CountUp, RevealObserver, Spotlight, Tilt } from "@/components/landing/motion";
 import { ProductPreview } from "@/components/landing/product-preview";
 import { SECTIONS } from "@/components/landing/sections";
 import { cn } from "@/lib/cn";
 
 /**
  * Props that make an element fade up when it scrolls into view, `delay` ms after.
- * The "3d" variant tips it up out of the page instead, for cards.
+ * The "3d" variant tips it up out of the page instead, for cards; "flip" swings it
+ * round like a door, for small chips.
  */
-const reveal = (delay = 0, variant: "" | "3d" = "") => ({
+const reveal = (delay = 0, variant: "" | "3d" | "flip" = "") => ({
   "data-reveal-item": variant,
   style: { "--delay": `${delay}ms` } as React.CSSProperties,
 });
@@ -77,13 +82,17 @@ export function LandingPage() {
         <Hero />
         <ProofStrip />
         <HowItWorks />
+        <Demo />
         <Capabilities />
         <Security />
         <Deliverables />
+        <SelfHost />
         <Faq />
         <ClosingCta />
       </main>
       <Footer />
+      <BackToTop />
+      <StickyCta />
     </div>
   );
 }
@@ -123,7 +132,8 @@ function IconTile({ children, small = false }: { children: React.ReactNode; smal
     <span
       className={cn(
         // `tilt-pop`: inside a tilting card, the icon floats forward off the surface.
-        "tilt-pop flex shrink-0 items-center justify-center bg-accent-soft text-accent",
+        // `reveal-spin`: it turns over like a coin as its card scrolls into view.
+        "tilt-pop reveal-spin flex shrink-0 items-center justify-center bg-accent-soft text-accent",
         small ? "size-9 rounded-lg" : "size-10 rounded-xl",
       )}
     >
@@ -151,6 +161,8 @@ function Hero() {
       >
         <div className="animate-drift size-full rounded-full bg-accent/15 blur-3xl" />
       </div>
+      <Spotlight />
+      <FloatingCubes />
       <Container className="relative pt-16 pb-20 sm:pt-24 sm:pb-28">
         <div className="mx-auto max-w-3xl text-center">
           <span className="animate-rise inline-flex items-center gap-1.5 rounded-full border border-line bg-panel px-3 py-1 text-[12.5px] font-medium text-ink-2 shadow-card">
@@ -162,7 +174,7 @@ function Hero() {
             style={{ animationDelay: "80ms" }}
           >
             Ask your data anything.{" "}
-            <span className="bg-linear-to-r from-accent to-accent-ink bg-clip-text text-transparent">
+            <span className="text-sheen bg-linear-to-r from-accent via-accent-ink to-accent bg-clip-text text-transparent">
               Get answers you can check.
             </span>
           </h1>
@@ -187,17 +199,16 @@ function Hero() {
             aria-hidden="true"
             className="pointer-events-none absolute -inset-x-6 -inset-y-4 -z-10 rounded-[28px] bg-linear-to-b from-accent/20 to-transparent blur-2xl"
           />
-          {/* Three layers, three jobs: perspective, the scroll-driven unfold, the pointer tilt. */}
-          <div className="[perspective:2000px]">
-            <div className="hero-unfold">
-              <Tilt max={3} className="rounded-2xl">
-                <ProductPreview />
-              </Tilt>
+          <Replay label="Replay the run" caption="Shown with the sample retail dataset included with Numera.">
+            {/* Three layers, three jobs: perspective, the scroll-driven unfold, the pointer tilt. */}
+            <div className="[perspective:2000px]">
+              <div className="hero-unfold">
+                <Tilt max={3} className="rounded-2xl">
+                  <ProductPreview />
+                </Tilt>
+              </div>
             </div>
-          </div>
-          <p className="mt-3 text-center text-[12px] text-ink-3">
-            Shown with the sample retail dataset included with Numera.
-          </p>
+          </Replay>
         </div>
       </Container>
     </section>
@@ -261,7 +272,23 @@ function HowItWorks() {
           title="From raw file to board-ready answer in minutes"
           body="No SQL, no notebooks to maintain, no waiting in the analytics queue."
         />
-        <ol className="mt-16 grid gap-6 md:grid-cols-3">
+        {/* A rail that draws itself from the first step to the last, above the cards. The
+            columns are a third of the width less the gaps, so their centres sit 8px in
+            from the sixths. */}
+        <div {...reveal()} aria-hidden="true" className="relative mt-16 hidden grid-cols-3 gap-6 md:grid">
+          <div className="absolute inset-x-[calc(100%/6_-_8px)] top-1/2 h-px -translate-y-1/2 bg-line-strong">
+            <div className="reveal-grow-x h-full bg-accent" />
+          </div>
+          {STEPS.map((step, index) => (
+            <div key={step.title} className="flex justify-center">
+              <span
+                className="reveal-pop relative size-3 rounded-full bg-accent ring-4 ring-canvas"
+                style={stagger(index * 450)}
+              />
+            </div>
+          ))}
+        </div>
+        <ol className="mt-16 grid gap-6 md:mt-6 md:grid-cols-3">
           {STEPS.map(({ icon: Icon, title, body }, index) => (
             <li key={title} {...reveal(index * 120, "3d")}>
               <Tilt className={cn("h-full rounded-2xl border border-line bg-panel p-6 shadow-card", LIFT)}>
@@ -278,6 +305,67 @@ function HowItWorks() {
           ))}
         </ol>
       </Container>
+    </section>
+  );
+}
+
+/* ----------------------------------------------------------------------------- demo */
+
+// Questions the sample dataset's columns can answer. They are prompts, not results.
+const QUESTIONS = [
+  [
+    "Why did revenue grow last year?",
+    "Which category has the highest return rate?",
+    "Do discounts actually lift units sold?",
+    "Which region is the most profitable?",
+    "What will revenue look like next quarter?",
+  ],
+  [
+    "Is the gap between Online and Retail Store significant?",
+    "Which customers come back after their first order?",
+    "What are our top ten products by margin?",
+    "How does Small Business compare with Consumer?",
+    "What would a 5% price increase do to revenue?",
+  ],
+];
+
+function Demo() {
+  return (
+    <section id="demo" className="scroll-mt-24 pb-24 sm:pb-32">
+      <Container>
+        <SectionHeading
+          center
+          eyebrow="See it work"
+          title="Pick a question, see how it is answered"
+          body="Three answers from the sample retail dataset, exactly as Numera reports them."
+        />
+        <AnswerExplorer {...reveal(100)} className="mt-14" />
+      </Container>
+      <div {...reveal()} className="mt-16 space-y-2.5">
+        <p className="px-5 text-center text-[13px] text-ink-3">Or ask it anything else</p>
+        {QUESTIONS.map((row, index) => (
+          <div key={row[0]} className="marquee">
+            <div
+              className="marquee-track"
+              style={{ "--dur": `${52 + index * 10}s`, animationDirection: index % 2 ? "reverse" : "normal" } as React.CSSProperties}
+            >
+              {[false, true].map((copy) => (
+                <ul key={String(copy)} aria-hidden={copy} className="marquee-group">
+                  {row.map((question) => (
+                    <li
+                      key={question}
+                      className="flex items-center gap-2 rounded-full border border-line bg-panel px-3.5 py-1.5 text-[13px] whitespace-nowrap text-ink-2 shadow-card"
+                    >
+                      <MessageSquareText className="size-3.5 text-accent" />
+                      {question}
+                    </li>
+                  ))}
+                </ul>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
     </section>
   );
 }
@@ -336,6 +424,14 @@ const WATERFALL = [
 ] as const;
 
 const COHORT = [100, 42, 35, 31, 28, 26];
+
+// Counts of what ships, and the default row limit. Not usage figures: there are none to cite.
+const LIMITS = [
+  { to: 8, suffix: "", label: "forecasting methods, backtested against each other" },
+  { to: 5, suffix: "", label: "SQL dialects, queried read-only" },
+  { to: 2, suffix: "M", label: "rows per dataset, by default" },
+  { to: 0, suffix: "", label: "model tokens for drivers, forecasts, tests and monitors" },
+];
 
 function Capabilities() {
   return (
@@ -543,6 +639,17 @@ function Capabilities() {
             ))}
           </div>
         </div>
+
+        <dl className="mt-14 grid grid-cols-2 gap-x-6 gap-y-8 border-t border-line pt-10 lg:grid-cols-4">
+          {LIMITS.map(({ to, suffix, label }, index) => (
+            <div key={label} {...reveal(index * 80)} className="flex flex-col-reverse gap-1.5">
+              <dt className="text-[13.5px] leading-snug text-ink-2">{label}</dt>
+              <dd className="text-3xl font-semibold tracking-tight text-ink tabular-nums sm:text-4xl">
+                <CountUp to={to} suffix={suffix} delay={index * 80} />
+              </dd>
+            </div>
+          ))}
+        </dl>
       </Container>
     </section>
   );
@@ -612,6 +719,19 @@ function Security() {
           ))}
         </div>
       </Container>
+      <Container className="mt-20 sm:mt-24">
+        <div {...reveal()} className="max-w-2xl">
+          <h3 className="text-xl font-semibold tracking-tight text-ink sm:text-2xl">
+            Follow four rows from the file to the prompt
+          </h3>
+          <p className="mt-2 text-[15px] leading-relaxed text-ink-2">
+            Real rows from the sample dataset, at each stage. Switch between them to see what changed and why.
+          </p>
+        </div>
+        <div {...reveal(100, "3d")} className="mt-8">
+          <DataJourney />
+        </div>
+      </Container>
     </section>
   );
 }
@@ -643,7 +763,7 @@ function Deliverables() {
           {OUTPUTS.map(({ icon: Icon, label }, index) => (
             <li
               key={label}
-              {...reveal(index * 70)}
+              {...reveal(index * 70, "flip")}
               className={cn(
                 "flex items-center gap-2.5 rounded-xl border border-line bg-canvas/60 px-3.5 py-3 text-[13.5px] text-ink",
                 LIFT,
@@ -654,6 +774,46 @@ function Deliverables() {
             </li>
           ))}
         </ul>
+      </Container>
+    </section>
+  );
+}
+
+/* ------------------------------------------------------------------------ self-host */
+
+const DEPLOY = [
+  { command: "cp .env.example .env", comment: "add OPENAI_API_KEY and AUTH_SECRET" },
+  { command: "docker compose up --build" },
+];
+
+const DEPLOY_FACTS = [
+  { icon: ServerCog, text: "Two containers: the web app and the analysis API behind it." },
+  { icon: Database, text: "Accounts, sessions and every dataset live in one Docker volume you control." },
+  { icon: UserCog, text: "The first account created becomes the administrator." },
+];
+
+function SelfHost() {
+  return (
+    <section id="self-host" className="scroll-mt-16 py-24 sm:py-32">
+      <Container className="grid items-center gap-12 lg:grid-cols-2 lg:gap-16">
+        <div>
+          <SectionHeading
+            eyebrow="Self-host"
+            title="Running on your servers in two commands"
+            body="Numera ships with Docker Compose. Add your keys, bring it up, and open it on port 3000."
+          />
+          <ul className="mt-8 space-y-4">
+            {DEPLOY_FACTS.map(({ icon: Icon, text }, index) => (
+              <li key={text} {...reveal(100 + index * 90)} className="flex items-start gap-3">
+                <Icon className="mt-0.5 size-5 shrink-0 text-accent" />
+                <span className="text-[14.5px] leading-relaxed text-ink-2">{text}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div {...reveal(150, "3d")}>
+          <CopyCommand lines={DEPLOY} />
+        </div>
       </Container>
     </section>
   );
@@ -688,19 +848,32 @@ const FAQ = [
   },
 ];
 
+/** The same questions as structured data, so a search engine can show them with the page. */
+const FAQ_JSON_LD = JSON.stringify({
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  mainEntity: FAQ.map(({ q, a }) => ({
+    "@type": "Question",
+    name: q,
+    acceptedAnswer: { "@type": "Answer", text: a },
+  })),
+}).replace(/</g, "\\u003c");
+
 function Faq() {
   return (
-    <section id="faq" className="scroll-mt-16 py-24 sm:py-32">
+    <section id="faq" className="scroll-mt-16 border-t border-line py-24 sm:py-32">
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: FAQ_JSON_LD }} />
       <Container className="grid gap-12 lg:grid-cols-[minmax(0,4fr)_minmax(0,8fr)]">
         <SectionHeading eyebrow="FAQ" title="Questions, answered" />
         <div {...reveal(100)} className="divide-y divide-line border-y border-line">
           {FAQ.map(({ q, a }) => (
-            <details key={q} className="faq-item group">
+            // A shared `name` makes the group an accordion: opening one closes the rest.
+            <details key={q} name="faq" className="faq-item group">
               <summary className="flex cursor-pointer list-none items-center justify-between gap-4 py-5 text-left text-[16px] font-medium text-ink transition-colors hover:text-accent [&::-webkit-details-marker]:hidden">
                 {q}
                 <ChevronDown className="size-5 shrink-0 text-ink-3 transition duration-300 group-open:rotate-180" />
               </summary>
-              <p className="-mt-1 pb-5 text-[15px] leading-relaxed text-ink-2">{a}</p>
+              <p className="faq-answer -mt-1 pb-5 text-[15px] leading-relaxed text-ink-2">{a}</p>
             </details>
           ))}
         </div>
@@ -713,7 +886,7 @@ function Faq() {
 
 function ClosingCta() {
   return (
-    <section className="pb-24 sm:pb-32">
+    <section data-cta-zone className="pb-24 sm:pb-32">
       <Container>
         <div
           {...reveal()}
@@ -762,7 +935,7 @@ function ClosingCta() {
 
 function Footer() {
   return (
-    <footer className="border-t border-line">
+    <footer data-cta-zone className="border-t border-line">
       <Container className="flex flex-col gap-10 py-12 md:flex-row md:justify-between">
         <div className="max-w-xs">
           <Wordmark />
@@ -781,6 +954,11 @@ function Footer() {
                   </a>
                 </li>
               ))}
+              <li>
+                <a href="#self-host" className="text-ink-2 transition hover:text-ink">
+                  Self-host
+                </a>
+              </li>
             </ul>
           </div>
           <div>

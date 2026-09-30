@@ -61,6 +61,46 @@ export function Tilt({
 }
 
 /**
+ * A soft light that follows the pointer across its parent section (styles in globals.css).
+ * Decoration only, under the same conditions as `Tilt`: a real hover pointer, motion welcome.
+ */
+export function Spotlight() {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    const host = el?.parentElement;
+    if (!el || !host || prefersReducedMotion() || !window.matchMedia("(hover: hover) and (pointer: fine)").matches)
+      return;
+    let frame = 0;
+    const onMove = (event: PointerEvent) => {
+      const box = host.getBoundingClientRect();
+      const px = event.clientX - box.left;
+      const py = event.clientY - box.top;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        el.dataset.on = "";
+        el.style.setProperty("--sx", `${px.toFixed(0)}px`);
+        el.style.setProperty("--sy", `${py.toFixed(0)}px`);
+      });
+    };
+    const onLeave = () => {
+      cancelAnimationFrame(frame);
+      delete el.dataset.on;
+    };
+    host.addEventListener("pointermove", onMove);
+    host.addEventListener("pointerleave", onLeave);
+    return () => {
+      cancelAnimationFrame(frame);
+      host.removeEventListener("pointermove", onMove);
+      host.removeEventListener("pointerleave", onLeave);
+    };
+  }, []);
+
+  return <div ref={ref} aria-hidden="true" className="spotlight" />;
+}
+
+/**
  * Fades `[data-reveal-item]` elements up as they scroll into view (see globals.css).
  *
  * Nothing is hidden until this runs, so a page whose script never loads is simply static.

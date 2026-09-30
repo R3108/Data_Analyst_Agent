@@ -5,6 +5,7 @@
  */
 export const SECTIONS = [
   { href: "#how-it-works", label: "How it works" },
+  { href: "#demo", label: "Demo" },
   { href: "#capabilities", label: "Capabilities" },
   { href: "#security", label: "Security" },
   { href: "#faq", label: "FAQ" },
